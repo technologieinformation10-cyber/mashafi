@@ -65,7 +65,7 @@ const QURAN_SURAHS = [
   { number: 59, name: "الحشر", startPage: 545, endPage: 547 },
   { number: 60, name: "الممتحنة", startPage: 548, endPage: 550 },
   { number: 61, name: "الصف", startPage: 551, endPage: 552 },
-  { number: 62, name: "الجمعة", startPage: 553, endPage: 553 },
+  { number: 62, name: "الجمعة", startPage: 553, endPage: 554 },
   { number: 63, name: "المنافقون", startPage: 554, endPage: 554 },
   { number: 64, name: "التغابن", startPage: 555, endPage: 556 },
   { number: 65, name: "الطلاق", startPage: 557, endPage: 559 },

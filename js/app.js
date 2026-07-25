@@ -29,6 +29,9 @@
     surahPicker: document.getElementById("surahPicker"),
     surahSelect: document.getElementById("surahSelect"),
     surahRange: document.getElementById("surahRange"),
+    surahRangeControls: document.getElementById("surahRangeControls"),
+    surahShrinkBtn: document.getElementById("surahShrinkBtn"),
+    surahExtendBtn: document.getElementById("surahExtendBtn"),
     prevPage: document.getElementById("prevPage"),
     nextPage: document.getElementById("nextPage"),
     pageNumberLabel: document.getElementById("pageNumberLabel"),
@@ -59,6 +62,7 @@
 
     stopBtn: document.getElementById("stopBtn"),
     deleteBtn: document.getElementById("deleteBtn"),
+    downloadBtn: document.getElementById("downloadBtn"),
 
     speedRow: document.getElementById("speedRow"),
     repeatRow: document.getElementById("repeatRow"),
@@ -95,6 +99,7 @@
 
     audio: new Audio(),
     currentObjectUrl: null,
+    currentRecMime: null,
     hasRecording: false,
 
     playbackRate: 1,
@@ -167,7 +172,97 @@
     }
   }
 
+  // ===== تحميل/إرسال التسجيلات (لإرسالها للمعلّمة) =====
+  function extFromMime(mime) {
+    if (!mime) return "webm";
+    if (mime.includes("mp4")) return "m4a";
+    if (mime.includes("ogg")) return "ogg";
+    return "webm";
+  }
+
+  function sanitizeFileName(str) {
+    return String(str).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
+  }
+
+  function buildRecordingFileName(type, id, mime) {
+    const ext = extFromMime(mime);
+    if (type === "surah") {
+      const surah = surahByNumber(id);
+      const name = surah ? sanitizeFileName(surah.name) : id;
+      return `سورة-${id}-${name}.${ext}`;
+    }
+    return `صفحة-${id}.${ext}`;
+  }
+
+  function triggerDownload(blobOrUrl, filename) {
+    const isBlob = blobOrUrl instanceof Blob;
+    const url = isBlob ? URL.createObjectURL(blobOrUrl) : blobOrUrl;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (isBlob) setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  // يحاول فتح قائمة المشاركة مباشرة (لإرسال الملف عبر واتساب مثلًا للمعلّمة)
+  // فإن تعذّر ذلك (حاسوب، أو متصفح لا يدعمها)، يقوم بتحميل الملف عاديًا
+  async function shareOrDownloadBlob(blob, filename, shareTitle) {
+    try {
+      const file = new File([blob], filename, { type: blob.type || "audio/webm" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: shareTitle || filename });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // ألغى المستخدم المشاركة
+    }
+    triggerDownload(blob, filename);
+  }
+
+  async function downloadRecordingFor(type, id, label) {
+    const rec = type === "surah" ? await QuranDB.getSurahRecording(id) : await QuranDB.getRecording(id);
+    if (!rec || !rec.blob) {
+      showToast("لا يوجد تسجيل لتحميله");
+      return;
+    }
+    const filename = buildRecordingFileName(type, id, rec.mimeType || rec.blob.type);
+    await shareOrDownloadBlob(rec.blob, filename, label);
+  }
+
+  function downloadIconSVG() {
+    return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+      <path fill="currentColor" d="M12 3v10.5m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/>
+    </svg>`;
+  }
+
   // ===== أدوات السور =====
+  const SURAH_OVERRIDES_KEY = "quran-surah-overrides";
+
+  // يطبّق أي تصحيحات حفظها المستخدم سابقًا لحدود بعض السور (صفحة النهاية)
+  // فوق البيانات الافتراضية في surahs.js، لأن بعض السور قد تمتد فعليًا
+  // لصفحة إضافية مقارنةً بما هو مُدخل مسبقًا.
+  function loadSurahOverrides() {
+    let overrides = {};
+    try { overrides = JSON.parse(localStorage.getItem(SURAH_OVERRIDES_KEY) || "{}"); } catch (e) { overrides = {}; }
+    Object.keys(overrides).forEach((key) => {
+      const surah = surahByNumber(parseInt(key, 10));
+      const o = overrides[key];
+      if (!surah || !o || typeof o.endPage !== "number") return;
+      if (o.endPage >= surah.startPage && o.endPage <= TOTAL_PAGES) {
+        surah.endPage = o.endPage;
+      }
+    });
+  }
+
+  function saveSurahOverride(surahNumber, endPage) {
+    let overrides = {};
+    try { overrides = JSON.parse(localStorage.getItem(SURAH_OVERRIDES_KEY) || "{}"); } catch (e) { overrides = {}; }
+    overrides[surahNumber] = { endPage };
+    try { localStorage.setItem(SURAH_OVERRIDES_KEY, JSON.stringify(overrides)); } catch (e) { /* تجاهل */ }
+  }
+
   function surahByNumber(n) {
     return QURAN_SURAHS.find((s) => s.number === n) || null;
   }
@@ -193,17 +288,21 @@
     }
     if (rec && rec.blob) {
       state.hasRecording = true;
+      state.currentRecMime = rec.mimeType || rec.blob.type || "";
       state.currentObjectUrl = URL.createObjectURL(rec.blob);
       state.audio.src = state.currentObjectUrl;
       el.recordedBadge.classList.remove("hidden");
       el.playBtn.disabled = false;
       el.deleteBtn.disabled = false;
+      el.downloadBtn.disabled = false;
     } else {
       state.hasRecording = false;
+      state.currentRecMime = null;
       state.audio.removeAttribute("src");
       el.recordedBadge.classList.add("hidden");
       el.playBtn.disabled = true;
       el.deleteBtn.disabled = true;
+      el.downloadBtn.disabled = true;
     }
     el.stopBtn.disabled = true;
     el.curTime.textContent = "0:00";
@@ -223,6 +322,7 @@
     el.pagePicker.classList.toggle("hidden", mode !== "page");
     el.surahPicker.classList.toggle("hidden", mode !== "surah");
     el.surahRange.classList.toggle("hidden", mode !== "surah");
+    el.surahRangeControls.classList.toggle("hidden", mode !== "surah");
     el.surahRecordHint.classList.toggle("hidden", mode !== "surah");
     el.recordBtnText.textContent = mode === "surah" ? "تسجيل السورة كاملة" : "تسجيل الصفحة";
     try { localStorage.setItem("quran-last-mode", mode); } catch (e) { /* تجاهل */ }
@@ -268,6 +368,7 @@
     el.pageNumberLabel.textContent = `سورة ${surah.name} — صفحة ${surah.startPage}`;
     const pageCount = surah.endPage - surah.startPage + 1;
     el.surahRange.textContent = `من صفحة ${surah.startPage} إلى ${surah.endPage} (${pageCount} صفحة)`;
+    updateSurahRangeButtonsState();
 
     try { localStorage.setItem("quran-last-surah", String(surah.number)); } catch (e) { /* تجاهل */ }
 
@@ -275,6 +376,29 @@
 
     const rec = await QuranDB.getSurahRecording(surah.number);
     await setAudioFromRecord(rec);
+  }
+
+  function updateSurahRangeButtonsState() {
+    if (!state.currentSurah) return;
+    const surah = state.currentSurah;
+    el.surahShrinkBtn.disabled = surah.endPage <= surah.startPage;
+    el.surahExtendBtn.disabled = surah.endPage >= TOTAL_PAGES;
+  }
+
+  // تصحيح يدوي لحدود السورة: عند مراجعة صور المصحف قد يتبيّن أن السورة
+  // تمتد فعليًا لصفحة إضافية (حتى لو جزءًا صغيرًا منها) قبل بداية السورة
+  // التالية، أو العكس. يُحفظ التصحيح محليًا ليبقى بعد إعادة فتح التطبيق.
+  function adjustSurahEndPage(delta) {
+    if (!state.currentSurah) return;
+    const surah = state.currentSurah;
+    const newEnd = Math.max(surah.startPage, Math.min(TOTAL_PAGES, surah.endPage + delta));
+    if (newEnd === surah.endPage) return;
+    surah.endPage = newEnd;
+    saveSurahOverride(surah.number, surah.endPage);
+    const pageCount = surah.endPage - surah.startPage + 1;
+    el.surahRange.textContent = `من صفحة ${surah.startPage} إلى ${surah.endPage} (${pageCount} صفحة)`;
+    updateSurahRangeButtonsState();
+    showToast(delta > 0 ? "تمت إضافة الصفحة التالية لهذه السورة" : "تم إرجاع آخر صفحة من هذه السورة");
   }
 
   // تقليب صفحات داخل السورة الحالية دون قطع التسجيل أو التشغيل الجاري
@@ -507,6 +631,9 @@
   }
 
   function makePlaylistItem(type, id, label) {
+    const wrap = document.createElement("div");
+    wrap.className = "playlist-item-row";
+
     const row = document.createElement("button");
     row.type = "button";
     row.className = "playlist-item";
@@ -518,7 +645,20 @@
       `<span class="playlist-item-badge${order ? " active" : ""}">${order || ""}</span>` +
       `<span class="playlist-item-label">${label}</span>`;
     row.addEventListener("click", () => togglePlaylistSelection(type, id, label));
-    return row;
+
+    const dlBtn = document.createElement("button");
+    dlBtn.type = "button";
+    dlBtn.className = "playlist-item-download";
+    dlBtn.setAttribute("aria-label", `تحميل/إرسال تسجيل ${label}`);
+    dlBtn.innerHTML = downloadIconSVG();
+    dlBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      downloadRecordingFor(type, id, label);
+    });
+
+    wrap.appendChild(row);
+    wrap.appendChild(dlBtn);
+    return wrap;
   }
 
   function togglePlaylistSelection(type, id, label) {
@@ -568,6 +708,7 @@
     el.recordRow.classList.add("hidden");
     el.surahRecordHint.classList.add("hidden");
     el.surahRange.classList.add("hidden");
+    el.surahRangeControls.classList.add("hidden");
     el.playlistBtn.classList.add("hidden");
     el.queueBar.classList.remove("hidden");
     await playQueueItem(0);
@@ -658,6 +799,9 @@
     if (!isNaN(n)) loadSurah(n);
   });
 
+  el.surahExtendBtn.addEventListener("click", () => adjustSurahEndPage(1));
+  el.surahShrinkBtn.addEventListener("click", () => adjustSurahEndPage(-1));
+
   // ===== ربط الأحداث: التشغيل =====
   el.playBtn.addEventListener("click", () => {
     if (state.isPlaying) pauseAudio();
@@ -691,6 +835,22 @@
       showToast("تم حذف التسجيل");
       loadPage(state.recordTarget.id);
     }
+  });
+
+  el.downloadBtn.addEventListener("click", async () => {
+    if (!state.hasRecording || !state.currentObjectUrl) return;
+    const type = state.recordTarget.type;
+    const id = state.recordTarget.id;
+    const label = type === "surah" && state.currentSurah ? `سورة ${state.currentSurah.name}` : `صفحة ${id}`;
+    const filename = buildRecordingFileName(type, id, state.currentRecMime);
+    // نجلب التسجيل من قاعدة البيانات مباشرةً (بدل الاعتماد على رابط التشغيل الحالي فقط)
+    // لضمان الحصول على كائن Blob صالح للمشاركة عبر واتساب أو غيره.
+    const rec = type === "surah" ? await QuranDB.getSurahRecording(id) : await QuranDB.getRecording(id);
+    if (!rec || !rec.blob) {
+      showToast("لا يوجد تسجيل لتحميله");
+      return;
+    }
+    await shareOrDownloadBlob(rec.blob, filename, label);
   });
 
   // ===== ربط الأحداث: التنقل بين الصفحات =====
@@ -782,6 +942,7 @@
   }
 
   // ===== البدء =====
+  loadSurahOverrides();
   populateSurahSelect();
 
   let startMode = "page";
