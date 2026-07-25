@@ -376,6 +376,10 @@ body {
 .ctrl-btn.danger { color: var(--danger-soft); border-color: rgba(192,86,60,0.35); }
 .ctrl-btn.danger:hover:not(:disabled) { background: rgba(192,86,60,0.12); }
 
+#downloadBtn { border-color: rgba(201,162,75,0.4); }
+#downloadBtn:hover:not(:disabled) { background: rgba(201,162,75,0.12); }
+.icon-download { flex-shrink: 0; }
+
 .rec-timer {
   font-size: 14px;
   color: var(--danger-soft);
@@ -520,8 +524,29 @@ input:focus-visible {
   text-align: center;
   font-size: 12.5px;
   color: var(--muted);
-  margin: -10px 0 16px;
+  margin: -10px 0 8px;
 }
+
+.surah-range-edit {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+.range-edit-btn {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--gold);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(201,162,75,0.3);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background .15s ease, opacity .15s ease;
+}
+.range-edit-btn:hover:not(:disabled) { background: rgba(201,162,75,0.14); }
+.range-edit-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .surah-record-hint {
   text-align: center;
@@ -689,6 +714,13 @@ input:focus-visible {
 }
 .playlist-section-title:first-child { margin-top: 4px; }
 
+.playlist-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
 .playlist-item {
   width: 100%;
   display: flex;
@@ -702,7 +734,7 @@ input:focus-visible {
   font-family: var(--font-ui);
   font-size: 14px;
   cursor: pointer;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   text-align: right;
   transition: background .15s ease, border-color .15s ease;
 }
@@ -711,6 +743,22 @@ input:focus-visible {
   background: rgba(201,162,75,0.12);
   border-color: rgba(201,162,75,0.5);
 }
+
+.playlist-item-download {
+  flex-shrink: 0;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(201,162,75,0.35);
+  background: rgba(255,255,255,0.02);
+  color: var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.playlist-item-download:hover { background: rgba(201,162,75,0.14); border-color: var(--gold); }
+.playlist-item-download:active { transform: scale(0.94); }
 
 .playlist-item-badge {
   width: 24px; height: 24px;
