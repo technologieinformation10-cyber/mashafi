@@ -51,6 +51,10 @@
   </nav>
 
   <div class="surah-range hidden" id="surahRange"></div>
+  <div class="surah-range-edit hidden" id="surahRangeControls">
+    <button id="surahShrinkBtn" class="range-edit-btn" type="button">– إزالة آخر صفحة من السورة</button>
+    <button id="surahExtendBtn" class="range-edit-btn" type="button">+ ضمّ الصفحة التالية للسورة</button>
+  </div>
 
   <!-- شريط حالة قائمة الاستماع (يظهر فقط أثناء تشغيل قائمة) -->
   <div class="queue-bar hidden" id="queueBar">
@@ -127,6 +131,12 @@
         </button>
         <button id="deleteBtn" class="ctrl-btn danger" aria-label="حذف التسجيل" disabled>
           <span class="btn-text">حذف التسجيل</span>
+        </button>
+        <button id="downloadBtn" class="ctrl-btn" aria-label="تحميل أو إرسال التسجيل" disabled>
+          <svg class="icon-download" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path fill="currentColor" d="M12 3v10.5m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/>
+          </svg>
+          <span class="btn-text">تحميل / إرسال للمعلّمة</span>
         </button>
       </div>
 
