@@ -23,21 +23,45 @@
       </svg>
     </div>
     <h1 class="app-title">مراجعة وحفظ القرآن</h1>
-    <p class="app-subtitle">سجّل تلاوتك لكل صفحة وراجعها بلا حدود</p>
+    <p class="app-subtitle">سجّل تلاوتك وراجعها بلا حدود</p>
   </header>
 
-  <!-- شريط التنقل بين الصفحات -->
-  <nav class="page-nav" aria-label="التنقل بين صفحات المصحف">
-    <button id="prevPage" class="nav-btn" aria-label="الصفحة السابقة">›</button>
+  <!-- تبديل الوضع: صفحة / سورة كاملة -->
+  <div class="mode-tabs" id="modeTabs">
+    <button id="modePageBtn" class="mode-tab active" data-mode="page">تسجيل صفحة</button>
+    <button id="modeSurahBtn" class="mode-tab" data-mode="surah">تسجيل سورة كاملة</button>
+  </div>
 
-    <div class="page-picker">
+  <!-- شريط التنقل بين الصفحات / السور -->
+  <nav class="page-nav" id="pageNav" aria-label="التنقل">
+    <button id="prevPage" class="nav-btn" aria-label="التالي">›</button>
+
+    <div class="page-picker" id="pagePicker">
       <label for="pageInput" class="sr-only">رقم الصفحة</label>
       <input type="number" id="pageInput" min="1" max="604" value="1" inputmode="numeric">
       <span class="page-total">من 604</span>
     </div>
 
-    <button id="nextPage" class="nav-btn" aria-label="الصفحة التالية">‹</button>
+    <div class="surah-picker hidden" id="surahPicker">
+      <label for="surahSelect" class="sr-only">اختر السورة</label>
+      <select id="surahSelect"></select>
+    </div>
+
+    <button id="nextPage" class="nav-btn" aria-label="السابق">‹</button>
   </nav>
+
+  <div class="surah-range hidden" id="surahRange"></div>
+
+  <!-- شريط حالة قائمة الاستماع (يظهر فقط أثناء تشغيل قائمة) -->
+  <div class="queue-bar hidden" id="queueBar">
+    <button id="queuePrevBtn" class="queue-nav-btn" aria-label="المقطع السابق">‹</button>
+    <div class="queue-info">
+      <span id="queuePosition">المقطع 1 من 1</span>
+      <span id="queueLabel">—</span>
+    </div>
+    <button id="queueNextBtn" class="queue-nav-btn" aria-label="المقطع التالي">›</button>
+    <button id="queueStopBtn" class="queue-stop-btn" aria-label="إنهاء القائمة">إنهاء القائمة</button>
+  </div>
 
   <!-- بطاقة الصفحة -->
   <main class="page-card">
@@ -82,10 +106,10 @@
       </div>
 
       <!-- أزرار التسجيل -->
-      <div class="control-row record-row">
+      <div class="control-row record-row" id="recordRow">
         <button id="recordBtn" class="ctrl-btn record-btn" aria-label="بدء التسجيل">
           <span class="dot"></span>
-          <span class="btn-text">تسجيل</span>
+          <span class="btn-text" id="recordBtnText">تسجيل الصفحة</span>
         </button>
         <button id="stopRecordBtn" class="ctrl-btn hidden" aria-label="إيقاف التسجيل">
           <span class="square"></span>
@@ -93,6 +117,7 @@
         </button>
         <span id="recTimer" class="rec-timer hidden">0:00</span>
       </div>
+      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك تقليب صفحات السورة أثناء التسجيل، ويستمر التسجيل متصلاً حتى تضغط إيقاف.</p>
 
       <!-- أزرار التشغيل -->
       <div class="control-row playback-row">
@@ -119,7 +144,7 @@
 
       <!-- التكرار -->
       <div class="option-block">
-        <span class="option-label">عدد مرات التكرار</span>
+        <span class="option-label">عدد مرات التكرار (لكل مقطع)</span>
         <div class="repeat-row" id="repeatRow">
           <button class="chip repeat-chip active" data-repeat="1">1</button>
           <button class="chip repeat-chip" data-repeat="2">2</button>
@@ -132,6 +157,12 @@
           <button class="chip repeat-chip" data-repeat="infinite">∞</button>
         </div>
       </div>
+
+      <!-- زر فتح قائمة الاستماع -->
+      <button id="playlistBtn" class="playlist-open-btn">
+        <span class="playlist-icon" aria-hidden="true">☰</span>
+        <span>قائمة الاستماع (تشغيل عدة مقاطع تباعًا)</span>
+      </button>
 
     </div>
   </main>
@@ -149,7 +180,26 @@
   <img id="lightboxImg" alt="صورة صفحة المصحف مكبَّرة">
 </div>
 
+<!-- نافذة قائمة الاستماع -->
+<div id="playlistModal" class="modal hidden" role="dialog" aria-label="قائمة الاستماع">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>قائمة الاستماع</h2>
+      <button id="closePlaylistModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <p class="modal-hint">اختر عدة مقاطع (صفحات أو سور مسجَّلة) لتشغيلها الواحد تلو الآخر بترتيب اختيارك. اضغط على المقطع لإضافته أو إزالته من الترتيب.</p>
+    <div class="modal-body" id="playlistBody">
+      <p class="playlist-empty" id="playlistEmptyMsg">لا توجد تسجيلات محفوظة بعد. سجّل بعض الصفحات أو السور أولًا.</p>
+    </div>
+    <div class="modal-footer">
+      <button id="clearPlaylistBtn" class="ctrl-btn">مسح التحديد</button>
+      <button id="startPlaylistBtn" class="ctrl-btn primary" disabled>تشغيل القائمة</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/db.js"></script>
+<script src="js/surahs.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

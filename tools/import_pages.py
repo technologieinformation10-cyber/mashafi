@@ -1,7 +1,11 @@
 """
-import_pages.py — أداة استيراد صور صفحات المصحف إلى مجلد images/
-داخل مشروع quran-app، مع إعادة تسمية تلقائية بالصيغة page-<رقم الصفحة>.jpg
-وضغط الصور لتصغير حجمها دون فقدان وضوح النص.
+import_pages.py — أداة استيراد صور صفحات المصحف إلى جذر مشروع quran-app
+مباشرة (وليس داخل مجلد images/)، مع إعادة تسمية تلقائية بالصيغة
+page-<رقم الصفحة>.jpg وضغط الصور لتصغير حجمها دون فقدان وضوح النص.
+
+ملاحظة: الصور تُوضَع في جذر المشروع (بجانب index.html) لأن بعض واجهات
+الرفع (مثل رفع الملفات في GitHub) لا تقبل أكثر من 100 ملف دفعة واحدة عند
+الرفع داخل مجلد فرعي واحد بسهولة؛ الرفع دفعات مباشرة إلى الجذر أبسط.
 
 الاستخدام:
     python3 import_pages.py <مجلد الصور المصدر> <رقم أول صفحة في المجلد>
@@ -19,7 +23,7 @@ import os
 from PIL import Image
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEST_DIR = os.path.join(PROJECT_ROOT, "images")
+DEST_DIR = PROJECT_ROOT
 MAX_WIDTH = 1000
 JPEG_QUALITY = 82
 VALID_EXT = (".jpg", ".jpeg", ".png", ".webp")
@@ -53,7 +57,7 @@ def import_pages(source_dir, start_page):
         out_name = f"page-{page}.jpg"
         out_path = os.path.join(DEST_DIR, out_name)
         img.save(out_path, "JPEG", quality=JPEG_QUALITY, optimize=True)
-        print(f"{fname}  ->  images/{out_name}")
+        print(f"{fname}  ->  {out_name}")
 
     print(f"\nتم استيراد {len(files)} صفحة، من الصفحة {start_page} إلى {start_page + len(files) - 1}.")
 
