@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F2A2E">
+<meta name="description" content="تطبيق مراجعة وحفظ القرآن الكريم بالتسجيل الصوتي - يعمل بدون إنترنت">
+<title>مراجعة وحفظ القرآن</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- الرأس -->
+  <header class="app-header">
+    <div class="header-motif" aria-hidden="true">
+      <svg viewBox="0 0 100 40" class="arch-svg">
+        <path d="M0,40 L0,20 Q50,-10 100,20 L100,40 Z" />
+      </svg>
+    </div>
+    <h1 class="app-title">مراجعة وحفظ القرآن</h1>
+    <p class="app-subtitle">سجّل تلاوتك لكل صفحة وراجعها بلا حدود</p>
+  </header>
+
+  <!-- شريط التنقل بين الصفحات -->
+  <nav class="page-nav" aria-label="التنقل بين صفحات المصحف">
+    <button id="prevPage" class="nav-btn" aria-label="الصفحة السابقة">›</button>
+
+    <div class="page-picker">
+      <label for="pageInput" class="sr-only">رقم الصفحة</label>
+      <input type="number" id="pageInput" min="1" max="604" value="1" inputmode="numeric">
+      <span class="page-total">من 604</span>
+    </div>
+
+    <button id="nextPage" class="nav-btn" aria-label="الصفحة التالية">‹</button>
+  </nav>
+
+  <!-- بطاقة الصفحة -->
+  <main class="page-card">
+    <div class="page-card-inner">
+      <div class="page-frame-corner tl" aria-hidden="true"></div>
+      <div class="page-frame-corner tr" aria-hidden="true"></div>
+      <div class="page-frame-corner bl" aria-hidden="true"></div>
+      <div class="page-frame-corner br" aria-hidden="true"></div>
+
+      <div class="page-status">
+        <span id="pageNumberLabel">الصفحة 1</span>
+        <span id="recordedBadge" class="badge hidden">مسجَّلة</span>
+      </div>
+
+      <!-- صورة صفحة المصحف -->
+      <div class="page-image-wrap" id="pageImageWrap" role="button" tabindex="0" aria-label="تكبير صورة الصفحة">
+        <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف">
+        <div id="pageImagePlaceholder" class="page-image-placeholder">
+          لم تُضَف صورة هذه الصفحة بعد
+        </div>
+      </div>
+
+      <!-- حلقة التقدم / التكرار حول زر التشغيل -->
+      <div class="ring-wrap">
+        <svg class="progress-ring" viewBox="0 0 140 140">
+          <circle class="ring-bg" cx="70" cy="70" r="62"></circle>
+          <circle id="ringProgress" class="ring-fg" cx="70" cy="70" r="62"></circle>
+        </svg>
+        <button id="playBtn" class="ring-center-btn" aria-label="تشغيل">
+          <svg id="playIcon" viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="pauseIcon" viewBox="0 0 24 24" class="icon-pause hidden"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        </button>
+      </div>
+
+      <div class="repeat-info" id="repeatInfo">التكرار: مرة واحدة</div>
+
+      <!-- شريط التقدم الزمني -->
+      <div class="time-row">
+        <span id="curTime">0:00</span>
+        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+        <span id="durTime">0:00</span>
+      </div>
+
+      <!-- أزرار التسجيل -->
+      <div class="control-row record-row">
+        <button id="recordBtn" class="ctrl-btn record-btn" aria-label="بدء التسجيل">
+          <span class="dot"></span>
+          <span class="btn-text">تسجيل</span>
+        </button>
+        <button id="stopRecordBtn" class="ctrl-btn hidden" aria-label="إيقاف التسجيل">
+          <span class="square"></span>
+          <span class="btn-text">إيقاف التسجيل</span>
+        </button>
+        <span id="recTimer" class="rec-timer hidden">0:00</span>
+      </div>
+
+      <!-- أزرار التشغيل -->
+      <div class="control-row playback-row">
+        <button id="stopBtn" class="ctrl-btn" aria-label="إيقاف التشغيل" disabled>
+          <span class="square small"></span>
+          <span class="btn-text">إيقاف</span>
+        </button>
+        <button id="deleteBtn" class="ctrl-btn danger" aria-label="حذف التسجيل" disabled>
+          <span class="btn-text">حذف التسجيل</span>
+        </button>
+      </div>
+
+      <!-- السرعة -->
+      <div class="option-block">
+        <span class="option-label">سرعة التلاوة</span>
+        <div class="speed-row" id="speedRow">
+          <button class="chip speed-chip active" data-speed="1">1x</button>
+          <button class="chip speed-chip" data-speed="1.25">1.25x</button>
+          <button class="chip speed-chip" data-speed="1.5">1.5x</button>
+          <button class="chip speed-chip" data-speed="1.75">1.75x</button>
+          <button class="chip speed-chip" data-speed="2">2x</button>
+        </div>
+      </div>
+
+      <!-- التكرار -->
+      <div class="option-block">
+        <span class="option-label">عدد مرات التكرار</span>
+        <div class="repeat-row" id="repeatRow">
+          <button class="chip repeat-chip active" data-repeat="1">1</button>
+          <button class="chip repeat-chip" data-repeat="2">2</button>
+          <button class="chip repeat-chip" data-repeat="3">3</button>
+          <button class="chip repeat-chip" data-repeat="5">5</button>
+          <button class="chip repeat-chip" data-repeat="10">10</button>
+          <button class="chip repeat-chip" data-repeat="20">20</button>
+          <button class="chip repeat-chip" data-repeat="50">50</button>
+          <button class="chip repeat-chip" data-repeat="100">100</button>
+          <button class="chip repeat-chip" data-repeat="infinite">∞</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- شريط حالة سفلي -->
+  <footer class="app-footer">
+    <div id="toast" class="toast hidden"></div>
+    <p class="offline-note">يعمل بالكامل بدون إنترنت — كل تسجيلاتك محفوظة على جهازك فقط</p>
+  </footer>
+
+</div>
+
+<!-- صندوق تكبير صورة الصفحة -->
+<div id="lightbox" class="lightbox hidden" role="dialog" aria-label="تكبير صورة الصفحة">
+  <img id="lightboxImg" alt="صورة صفحة المصحف مكبَّرة">
+</div>
+
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
