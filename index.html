@@ -34,7 +34,7 @@
 
   <!-- شريط التنقل بين الصفحات / السور -->
   <nav class="page-nav" id="pageNav" aria-label="التنقل">
-    <button id="prevPage" class="nav-btn" aria-label="التالي">›</button>
+    <button id="prevPage" class="nav-btn" aria-label="التالي">‹</button>
 
     <div class="page-picker" id="pagePicker">
       <label for="pageInput" class="sr-only">رقم الصفحة</label>
@@ -47,7 +47,7 @@
       <select id="surahSelect"></select>
     </div>
 
-    <button id="nextPage" class="nav-btn" aria-label="السابق">‹</button>
+    <button id="nextPage" class="nav-btn" aria-label="السابق">›</button>
   </nav>
 
   <div class="surah-range hidden" id="surahRange"></div>
@@ -174,6 +174,12 @@
         <span>قائمة الاستماع (تشغيل عدة مقاطع تباعًا)</span>
       </button>
 
+      <!-- زر فتح اختبار ترتيب السور -->
+      <button id="quizBtn" class="playlist-open-btn">
+        <span class="playlist-icon" aria-hidden="true">🧩</span>
+        <span>اختبار ترتيب السور في كل جزء</span>
+      </button>
+
     </div>
   </main>
 
@@ -208,8 +214,37 @@
   </div>
 </div>
 
+<!-- نافذة اختبار ترتيب السور -->
+<div id="quizModal" class="modal hidden" role="dialog" aria-label="اختبار ترتيب السور">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>اختبار ترتيب السور</h2>
+      <button id="closeQuizModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <p class="modal-hint">اختر جزءًا، ثم اضغط على أسماء سوره بالترتيب الصحيح كما وردت في المصحف.</p>
+
+    <div class="quiz-picker-row">
+      <label for="quizJuzSelect" class="sr-only">اختر الجزء</label>
+      <select id="quizJuzSelect"></select>
+      <button id="quizStartBtn" class="ctrl-btn primary" type="button">ابدأ الاختبار</button>
+    </div>
+
+    <div class="modal-body" id="quizBody">
+      <div id="quizSequence" class="quiz-sequence"></div>
+      <div id="quizChips" class="quiz-chips"></div>
+      <p id="quizResult" class="quiz-result hidden"></p>
+    </div>
+
+    <div class="modal-footer">
+      <button id="quizResetBtn" class="ctrl-btn" type="button">إعادة الترتيب</button>
+      <button id="quizCheckBtn" class="ctrl-btn primary" type="button" disabled>تحقق من الترتيب</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/db.js"></script>
 <script src="js/surahs.js"></script>
+<script src="js/juz.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
