@@ -1,0 +1,36 @@
+/**
+ * juz.js — تقسيم القرآن إلى 30 جزءًا، وترتيب السور الظاهرة في كل جزء
+ * (جزئيًا أو كليًا) حسب صفحات هذا المصحف (604 صفحة).
+ */
+const QURAN_JUZ = [
+  { number: 1, startPage: 1, endPage: 21, surahs: [1, 2] },
+  { number: 2, startPage: 22, endPage: 41, surahs: [2] },
+  { number: 3, startPage: 42, endPage: 61, surahs: [2, 3] },
+  { number: 4, startPage: 62, endPage: 81, surahs: [3, 4] },
+  { number: 5, startPage: 82, endPage: 101, surahs: [4] },
+  { number: 6, startPage: 102, endPage: 121, surahs: [4, 5] },
+  { number: 7, startPage: 122, endPage: 141, surahs: [5, 6] },
+  { number: 8, startPage: 142, endPage: 161, surahs: [6, 7] },
+  { number: 9, startPage: 162, endPage: 181, surahs: [7, 8] },
+  { number: 10, startPage: 182, endPage: 201, surahs: [8, 9] },
+  { number: 11, startPage: 202, endPage: 221, surahs: [9, 10, 11] },
+  { number: 12, startPage: 222, endPage: 241, surahs: [11, 12] },
+  { number: 13, startPage: 242, endPage: 261, surahs: [12, 13, 14] },
+  { number: 14, startPage: 262, endPage: 281, surahs: [15, 16] },
+  { number: 15, startPage: 282, endPage: 301, surahs: [17, 18] },
+  { number: 16, startPage: 302, endPage: 321, surahs: [18, 19, 20] },
+  { number: 17, startPage: 322, endPage: 341, surahs: [21, 22, 23] },
+  { number: 18, startPage: 342, endPage: 361, surahs: [23, 24, 25] },
+  { number: 19, startPage: 362, endPage: 381, surahs: [25, 26, 27] },
+  { number: 20, startPage: 382, endPage: 401, surahs: [27, 28, 29] },
+  { number: 21, startPage: 402, endPage: 421, surahs: [29, 30, 31, 32, 33] },
+  { number: 22, startPage: 422, endPage: 441, surahs: [33, 34, 35, 36] },
+  { number: 23, startPage: 442, endPage: 461, surahs: [36, 37, 38, 39] },
+  { number: 24, startPage: 462, endPage: 481, surahs: [39, 40, 41] },
+  { number: 25, startPage: 482, endPage: 501, surahs: [41, 42, 43, 44, 45] },
+  { number: 26, startPage: 502, endPage: 521, surahs: [45, 46, 47, 48, 49, 50, 51] },
+  { number: 27, startPage: 522, endPage: 541, surahs: [51, 52, 53, 54, 55, 56, 57] },
+  { number: 28, startPage: 542, endPage: 561, surahs: [58, 59, 60, 61, 62, 63, 64, 65, 66] },
+  { number: 29, startPage: 562, endPage: 581, surahs: [67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77] },
+  { number: 30, startPage: 582, endPage: 604, surahs: [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114] },
+];

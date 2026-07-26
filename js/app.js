@@ -68,6 +68,17 @@
     repeatRow: document.getElementById("repeatRow"),
 
     playlistBtn: document.getElementById("playlistBtn"),
+    quizBtn: document.getElementById("quizBtn"),
+    quizModal: document.getElementById("quizModal"),
+    closeQuizModal: document.getElementById("closeQuizModal"),
+    quizJuzSelect: document.getElementById("quizJuzSelect"),
+    quizStartBtn: document.getElementById("quizStartBtn"),
+    quizBody: document.getElementById("quizBody"),
+    quizSequence: document.getElementById("quizSequence"),
+    quizChips: document.getElementById("quizChips"),
+    quizResult: document.getElementById("quizResult"),
+    quizResetBtn: document.getElementById("quizResetBtn"),
+    quizCheckBtn: document.getElementById("quizCheckBtn"),
     playlistModal: document.getElementById("playlistModal"),
     closePlaylistModal: document.getElementById("closePlaylistModal"),
     playlistBody: document.getElementById("playlistBody"),
@@ -108,6 +119,7 @@
     isPlaying: false,
 
     playlistSelection: [], // [{type:'page'|'surah', id, label}] بترتيب الاختيار
+    quiz: { juz: null, correctOrder: [], sequence: [], checked: false },
     queue: null, // { items: [...], index }
   };
 
@@ -235,6 +247,119 @@
     return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
       <path fill="currentColor" d="M12 3v10.5m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/>
     </svg>`;
+  }
+
+  // ===== اختبار ترتيب السور في كل جزء =====
+  function populateQuizJuzSelect() {
+    el.quizJuzSelect.innerHTML = "";
+    QURAN_JUZ.forEach((j) => {
+      const opt = document.createElement("option");
+      opt.value = String(j.number);
+      opt.textContent = `الجزء ${j.number}`;
+      el.quizJuzSelect.appendChild(opt);
+    });
+  }
+
+  function shuffleArray(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function juzByNumber(n) {
+    return QURAN_JUZ.find((j) => j.number === n);
+  }
+
+  function startQuiz() {
+    const juzNum = parseInt(el.quizJuzSelect.value, 10);
+    const juz = juzByNumber(juzNum);
+    if (!juz) return;
+    state.quiz = {
+      juz: juzNum,
+      correctOrder: juz.surahs.slice(),
+      sequence: [],
+      shuffled: shuffleArray(juz.surahs),
+      checked: false,
+    };
+    renderQuiz();
+  }
+
+  function renderQuiz() {
+    const q = state.quiz;
+    el.quizResult.classList.add("hidden");
+    el.quizResult.textContent = "";
+    el.quizResult.className = "quiz-result hidden";
+
+    // منطقة التسلسل الذي بناه المستخدم
+    el.quizSequence.innerHTML = "";
+    if (q.sequence.length === 0) {
+      const hint = document.createElement("span");
+      hint.className = "quiz-empty-hint";
+      hint.textContent = "اضغط على السور بالأسفل بالترتيب الصحيح…";
+      el.quizSequence.appendChild(hint);
+    } else {
+      q.sequence.forEach((num, idx) => {
+        const surah = surahByNumber(num);
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "quiz-chip placed";
+        chip.textContent = `${idx + 1}. سورة ${surah ? surah.name : num}`;
+        if (!q.checked) {
+          chip.addEventListener("click", () => {
+            state.quiz.sequence = state.quiz.sequence.filter((n) => n !== num);
+            renderQuiz();
+          });
+        }
+        el.quizSequence.appendChild(chip);
+      });
+    }
+
+    // مجموعة السور المتبقية (لم تُختر بعد)
+    el.quizChips.innerHTML = "";
+    const remaining = q.shuffled.filter((n) => !q.sequence.includes(n));
+    remaining.forEach((num) => {
+      const surah = surahByNumber(num);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "quiz-chip";
+      chip.textContent = `سورة ${surah ? surah.name : num}`;
+      chip.addEventListener("click", () => {
+        state.quiz.sequence.push(num);
+        renderQuiz();
+      });
+      el.quizChips.appendChild(chip);
+    });
+
+    el.quizCheckBtn.disabled = q.sequence.length !== q.correctOrder.length || q.checked;
+  }
+
+  function checkQuiz() {
+    const q = state.quiz;
+    if (q.sequence.length !== q.correctOrder.length) return;
+    q.checked = true;
+    let correctCount = 0;
+    const chips = el.quizSequence.querySelectorAll(".quiz-chip");
+    q.sequence.forEach((num, idx) => {
+      const ok = num === q.correctOrder[idx];
+      if (ok) correctCount++;
+      if (chips[idx]) chips[idx].classList.add(ok ? "correct" : "wrong");
+    });
+    el.quizResult.classList.remove("hidden");
+    if (correctCount === q.correctOrder.length) {
+      el.quizResult.className = "quiz-result success";
+      el.quizResult.textContent = "أحسنت! الترتيب صحيح تمامًا 🎉";
+    } else {
+      el.quizResult.className = "quiz-result fail";
+      const correctNames = q.correctOrder.map((n) => {
+        const s = surahByNumber(n);
+        return s ? s.name : n;
+      }).join(" ← ");
+      el.quizResult.textContent = `الترتيب الصحيح غير مكتمل (${correctCount} من ${q.correctOrder.length} في مكانها الصحيح). الترتيب الصحيح: ${correctNames}`;
+    }
+    el.quizCheckBtn.disabled = true;
   }
 
   // ===== أدوات السور =====
@@ -924,6 +1049,19 @@
   el.queueNextBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index + 1); });
   el.queueStopBtn.addEventListener("click", exitQueueToNormalView);
 
+  // ===== ربط الأحداث: اختبار ترتيب السور =====
+  el.quizBtn.addEventListener("click", () => {
+    el.quizModal.classList.remove("hidden");
+    startQuiz();
+  });
+  el.closeQuizModal.addEventListener("click", () => el.quizModal.classList.add("hidden"));
+  el.quizModal.addEventListener("click", (e) => {
+    if (e.target === el.quizModal) el.quizModal.classList.add("hidden");
+  });
+  el.quizStartBtn.addEventListener("click", startQuiz);
+  el.quizResetBtn.addEventListener("click", startQuiz);
+  el.quizCheckBtn.addEventListener("click", checkQuiz);
+
   // منع فقدان تسجيل جارٍ عند إغلاق الصفحة
   window.addEventListener("beforeunload", (e) => {
     if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
@@ -944,6 +1082,7 @@
   // ===== البدء =====
   loadSurahOverrides();
   populateSurahSelect();
+  populateQuizJuzSelect();
 
   let startMode = "page";
   try {
