@@ -980,12 +980,14 @@
 
   // ===== ربط الأحداث: التنقل بين الصفحات =====
   el.prevPage.addEventListener("click", () => {
-    if (state.mode === "surah") flipSurahPage(1); // RTL: التالي بصريًا = زيادة الرقم
-    else loadPage(state.currentPage + 1);
-  });
-  el.nextPage.addEventListener("click", () => {
+    // زر اليمين = الصفحة السابقة (الرقم الأصغر)
     if (state.mode === "surah") flipSurahPage(-1);
     else loadPage(state.currentPage - 1);
+  });
+  el.nextPage.addEventListener("click", () => {
+    // زر اليسار = الصفحة التالية (الرقم الأكبر)
+    if (state.mode === "surah") flipSurahPage(1);
+    else loadPage(state.currentPage + 1);
   });
 
   el.pageInput.addEventListener("change", () => {
