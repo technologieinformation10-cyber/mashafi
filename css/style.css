@@ -629,6 +629,64 @@ input:focus-visible {
 .playlist-open-btn:hover { background: rgba(201,162,75,0.08); }
 .playlist-icon { font-size: 15px; }
 
+/* ===== اختبار ترتيب السور ===== */
+.quiz-picker-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0 16px;
+}
+#quizJuzSelect {
+  flex: 1;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(201,162,75,0.35);
+  color: var(--cream);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.quiz-sequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 46px;
+  padding: 10px;
+  border: 1px dashed rgba(201,162,75,0.35);
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.quiz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quiz-chip {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--cream);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.quiz-chip:hover { border-color: rgba(201,162,75,0.5); }
+.quiz-chip.placed { background: rgba(201,162,75,0.14); border-color: rgba(201,162,75,0.5); }
+.quiz-chip.correct { background: rgba(60,140,90,0.25); border-color: rgba(60,180,100,0.6); color: #bdf2cf; }
+.quiz-chip.wrong { background: rgba(192,86,60,0.22); border-color: rgba(192,86,60,0.6); color: #ffd0c4; }
+.quiz-empty-hint { font-size: 12.5px; color: var(--muted); }
+.quiz-result {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+}
+.quiz-result.success { color: #7fdb9c; }
+.quiz-result.fail { color: var(--danger-soft); }
+
 /* ===== نافذة قائمة الاستماع (Modal) ===== */
 .modal {
   position: fixed;
