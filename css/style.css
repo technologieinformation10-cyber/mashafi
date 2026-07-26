@@ -851,3 +851,33 @@ input:focus-visible {
   font-weight: 700;
 }
 .ctrl-btn.primary:disabled { opacity: 0.35; }
+
+/* ===== بطاقات السور المتعددة على نفس الصفحة (وضع الصفحة) ===== */
+/* تعيد استخدام مكوّنات playlist-item/-download/-badge نفسها للحفاظ على
+   نفس الهوية البصرية، دون الحاجة لتعريف مظهر جديد. */
+.page-surah-list { margin: 2px 0 16px; }
+.page-surah-list .surah-record-hint { margin: 0 0 10px; }
+.page-surah-list .playlist-item-row { margin-bottom: 8px; }
+.page-surah-list .playlist-item-row:last-child { margin-bottom: 0; }
+
+/* ===== تسجيلات قديمة تحتاج تعيين سورة يدويًا ===== */
+.pending-item {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.pending-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.pending-item-title {
+  flex: 1;
+  font-size: 14px;
+  color: var(--cream);
+}
+.pending-item-chips { justify-content: flex-start; }
+.pending-assign-chip { font-size: 12.5px; }
