@@ -80,6 +80,13 @@
         <span id="recordedBadge" class="badge hidden">مسجَّلة</span>
       </div>
 
+      <!-- بطاقات مستقلة لكل سورة عندما تضم الصفحة الحالية أكثر من سورة واحدة
+           (مثال: صفحة 545 تضم نهاية سورة المجادلة وبداية سورة الحشر) -->
+      <div class="page-surah-list hidden" id="pageSurahList">
+        <p class="surah-record-hint">هذه الصفحة تضم أكثر من سورة، ولكل سورة تسجيلها المستقل — اختر أيّها تريد التعامل معه:</p>
+        <div id="pageSurahListBody"></div>
+      </div>
+
       <!-- صورة صفحة المصحف -->
       <div class="page-image-wrap" id="pageImageWrap" role="button" tabindex="0" aria-label="تكبير صورة الصفحة">
         <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف">
@@ -180,6 +187,12 @@
         <span>اختبار ترتيب السور في كل جزء</span>
       </button>
 
+      <!-- زر تسجيلات قديمة تحتاج تعيين سورة (يظهر فقط عند وجودها) -->
+      <button id="pendingBtn" class="playlist-open-btn hidden">
+        <span class="playlist-icon" aria-hidden="true">⚠️</span>
+        <span id="pendingBtnLabel">تسجيلات قديمة تحتاج تعيين السورة</span>
+      </button>
+
     </div>
   </main>
 
@@ -239,6 +252,18 @@
       <button id="quizResetBtn" class="ctrl-btn" type="button">إعادة الترتيب</button>
       <button id="quizCheckBtn" class="ctrl-btn primary" type="button" disabled>تحقق من الترتيب</button>
     </div>
+  </div>
+</div>
+
+<!-- نافذة تسجيلات قديمة تحتاج تعيين سورة -->
+<div id="pendingModal" class="modal hidden" role="dialog" aria-label="تسجيلات تحتاج إلى تعيين السورة">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>تسجيلات تحتاج تعيين السورة</h2>
+      <button id="closePendingModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <p class="modal-hint">هذه تسجيلات قديمة كانت محفوظة برقم الصفحة فقط، وصفحتها تضم أكثر من سورة، فتعذّر على التطبيق تحديد السورة الصحيحة تلقائيًا. استمع للتسجيل ثم اختر السورة الصحيحة له مرة واحدة، أو احذفه إن لم تعد بحاجته.</p>
+    <div class="modal-body" id="pendingBody"></div>
   </div>
 </div>
 
