@@ -121,3 +121,9 @@ const QURAN_SURAHS = [
   { number: 113, name: "الفلق", startPage: 604, endPage: 604 },
   { number: 114, name: "الناس", startPage: 604, endPage: 604 },
 ];
+
+// يتيح اختبار هذا الملف تلقائيًا خارج المتصفح (Node) دون أي تأثير على عمله
+// داخل المتصفح (typeof module غير معرّف هناك).
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = QURAN_SURAHS;
+}
