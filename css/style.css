@@ -852,32 +852,434 @@ input:focus-visible {
 }
 .ctrl-btn.primary:disabled { opacity: 0.35; }
 
-/* ===== بطاقات السور المتعددة على نفس الصفحة (وضع الصفحة) ===== */
-/* تعيد استخدام مكوّنات playlist-item/-download/-badge نفسها للحفاظ على
-   نفس الهوية البصرية، دون الحاجة لتعريف مظهر جديد. */
-.page-surah-list { margin: 2px 0 16px; }
-.page-surah-list .surah-record-hint { margin: 0 0 10px; }
-.page-surah-list .playlist-item-row { margin-bottom: 8px; }
-.page-surah-list .playlist-item-row:last-child { margin-bottom: 0; }
+/* ===================================================================== */
+/* ===== إضافات: وضع تسجيل الحزب، تحكّم قائمة الاستماع، نافذة التأكيد، ===== */
+/* ===== واختبار حفظ الأحزاب                                          ===== */
+/* ===================================================================== */
 
-/* ===== تسجيلات قديمة تحتاج تعيين سورة يدويًا ===== */
-.pending-item {
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.02);
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
+/* زر "اختبار حفظ الأحزاب" بلون مميّز قليلاً عن باقي الأزرار الثانوية */
+.playlist-open-btn.accent {
+  border-style: solid;
+  border-color: rgba(201,162,75,0.55);
+  background: rgba(201,162,75,0.06);
 }
-.pending-item-head {
+
+/* ===== إعادة تصميم صف عنصر قائمة الاستماع ليتّسع لخمسة أزرار تحكّم ===== */
+.playlist-item-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.playlist-item-row:last-child { border-bottom: none; }
+
+.playlist-item-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  padding-inline-start: 4px;
 }
-.pending-item-title {
+
+.pl-ctrl-btn {
   flex: 1;
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(201,162,75,0.3);
+  background: rgba(255,255,255,0.02);
+  color: var(--gold);
   font-size: 14px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.pl-ctrl-btn:hover { background: rgba(201,162,75,0.14); border-color: var(--gold); }
+.pl-ctrl-btn:active { transform: scale(0.94); }
+.pl-ctrl-btn.pl-play { color: var(--gold-soft); }
+.pl-ctrl-btn.pl-delete { color: var(--danger-soft); border-color: rgba(192,86,60,0.35); }
+.pl-ctrl-btn.pl-delete:hover { background: rgba(192,86,60,0.14); border-color: var(--danger-soft); }
+
+/* ===== نافذة تأكيد عامة (حذف تسجيلات) ===== */
+.confirm-modal-overlay { z-index: 80; align-items: center; padding: 20px; }
+.confirm-card {
+  max-width: 360px;
+  padding: 22px 20px;
+  border-radius: 18px;
+  text-align: center;
+}
+.confirm-message {
+  margin: 0 0 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--cream);
+  white-space: pre-line;
+}
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-actions .ctrl-btn { flex: 1; justify-content: center; }
+
+/* ===== اختبار حفظ الأحزاب ===== */
+.hizb-test-coverage {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.hizb-test-progress { margin-bottom: 16px; }
+.hizb-test-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.hizb-test-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--gold-soft));
+  transition: width .25s ease;
+}
+#hizbTestProgressText { font-size: 12.5px; color: var(--muted); }
+
+.hizb-test-card {
+  border: 1px solid rgba(201,162,75,0.35);
+  border-radius: 16px;
+  padding: 22px 16px;
+  margin-bottom: 16px;
+  text-align: center;
+  background: rgba(255,255,255,0.02);
+}
+.hizb-test-meta {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--gold);
+}
+.hizb-test-prefix {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  line-height: 2;
   color: var(--cream);
 }
-.pending-item-chips { justify-content: flex-start; }
-.pending-assign-chip { font-size: 12.5px; }
+
+.hizb-test-nav-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.hizb-test-nav-row .ctrl-btn { flex: 1; justify-content: center; }
+
+.hizb-test-end-early {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 6px;
+}
+.hizb-test-end-early:hover { color: var(--gold-soft); }
+
+.hizb-test-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.review-item {
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(255,255,255,0.02);
+}
+.review-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.review-qnum { font-size: 12px; font-weight: 700; color: var(--gold); }
+.review-meta { font-size: 11px; color: var(--muted); }
+.review-prefix {
+  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.9;
+  color: var(--cream);
+}
+.review-audio {
+  width: 100%;
+  height: 36px;
+  margin-bottom: 8px;
+}
+.review-del-btn {
+  width: 100%;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+/* ===== تنبيه فتح التطبيق كملف مباشر (file://) بدل خادم ويب ===== */
+.file-protocol-warning {
+  background: rgba(217, 122, 95, 0.18);
+  border: 1px solid rgba(217, 122, 95, 0.5);
+  border-radius: 12px;
+  margin: 10px 14px 0;
+  padding: 12px 14px;
+  text-align: center;
+}
+.file-protocol-warning p {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--cream);
+}
+.file-protocol-warning button {
+  border: 1px solid rgba(217, 122, 95, 0.6);
+  background: rgba(217, 122, 95, 0.15);
+  color: var(--cream);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.file-protocol-warning button:hover { background: rgba(217, 122, 95, 0.28); }
+
+/* ===== حالة الحفظ ===== */
+
+.status-heading {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold-soft);
+  margin: 0 0 10px;
+}
+.status-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.status-chip {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--muted);
+}
+.status-chip.c-solid { background: rgba(90,155,120,0.18); border-color: rgba(90,155,120,0.5); color: #a9dcbe; }
+.status-chip.c-soon { background: rgba(201,162,75,0.18); border-color: rgba(201,162,75,0.5); color: var(--gold-soft); }
+.status-chip.c-needs { background: rgba(192,86,60,0.18); border-color: rgba(192,86,60,0.5); color: var(--danger-soft); }
+.status-chip.c-none { background: rgba(255,255,255,0.04); }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+}
+.status-cell {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.02);
+  color: var(--cream);
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.status-cell.c-solid { background: rgba(90,155,120,0.35); border-color: rgba(90,155,120,0.6); }
+.status-cell.c-soon { background: rgba(201,162,75,0.35); border-color: rgba(201,162,75,0.6); }
+.status-cell.c-needs { background: rgba(192,86,60,0.35); border-color: rgba(192,86,60,0.6); }
+.status-cell.c-none { background: rgba(255,255,255,0.03); color: var(--muted); }
+
+/* ===== سجل التقدّم الصوتي ===== */
+.progress-log-compare-row { margin-bottom: 14px; }
+.progress-log-compare-row .ctrl-btn { width: 100%; justify-content: center; }
+
+.progress-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.progress-log-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+}
+.progress-log-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.progress-log-num { font-weight: 700; color: var(--cream); font-size: 13px; }
+.progress-log-date { color: var(--muted); }
+.progress-log-duration { color: var(--gold-soft); }
+.progress-log-flag {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--danger-soft);
+}
+.progress-log-item-controls {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.progress-log-item-controls .pl-ctrl-btn {
+  width: 34px;
+  flex: none;
+}
+
+/* ===== زر عرض الصفحة الأصلية من المصحف داخل اختبار الحفظ ===== */
+.hizb-test-view-page-btn {
+  display: block;
+  margin: 14px auto 0;
+  background: none;
+  border: 1px solid rgba(201,162,75,0.35);
+  color: var(--gold-soft);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.hizb-test-view-page-btn:hover { background: rgba(201,162,75,0.12); }
+
+/* ===== علامات مواضع الأخطاء على صورة الصفحة ===== */
+.error-count-badge {
+  background: rgba(192,86,60,0.18);
+  border-color: rgba(192,86,60,0.5);
+  color: var(--danger-soft);
+}
+
+.error-marks-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* الطبقة نفسها شفافة للنقر؛ كل علامة تُفعِّل نقرها بنفسها */
+}
+
+.error-mark {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: rgba(192,86,60,0.85);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(192,86,60,0.9), 0 2px 5px rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+}
+.error-mark:active { transform: scale(0.9); }
+
+.page-image-wrap.mark-mode-active { cursor: crosshair; }
+
+.error-mark-controls {
+  margin: 4px 0 10px;
+  text-align: center;
+}
+.mark-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(192,86,60,0.4);
+  background: rgba(192,86,60,0.06);
+  color: var(--danger-soft);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.mark-mode-btn:hover { background: rgba(192,86,60,0.14); }
+.mark-mode-btn[aria-pressed="true"] {
+  background: rgba(192,86,60,0.25);
+  border-color: var(--danger-soft);
+  color: #fff;
+  font-weight: 700;
+}
+.mark-mode-hint {
+  margin: 8px auto 0;
+  max-width: 320px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.error-stats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.error-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  font-size: 13px;
+  cursor: pointer;
+}
+.error-stats-row:hover { border-color: rgba(201,162,75,0.35); }
+.error-stats-page { color: var(--cream); }
+.error-stats-count { font-weight: 700; }
+.error-stats-count.zero { color: var(--success); }
+.error-stats-count.nonzero { color: var(--danger-soft); }
+
+/* ===== تحديد الأخطاء داخل بطاقات مراجعة اختبار الحفظ ===== */
+.review-mark-toggle-btn {
+  display: block;
+  width: 100%;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(201,162,75,0.3);
+  background: rgba(255,255,255,0.02);
+  color: var(--gold-soft);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+}
+.review-mark-toggle-btn:hover { background: rgba(201,162,75,0.1); }
+
+.review-mark-panel { margin-top: 10px; }
+.review-mark-panel .page-status { margin-bottom: 6px; }
+.review-page-image-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-deep);
+  border: 1px solid rgba(201,162,75,0.22);
+  max-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.review-page-image-wrap.mark-mode-active { cursor: crosshair; }
+.review-page-image { width: 100%; max-height: 280px; object-fit: contain; display: block; }
