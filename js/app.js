@@ -3,41 +3,43 @@
  * يعمل بالكامل محليًا بدون إنترنت. التسجيلات تُحفظ في IndexedDB
  * عبر db.js وتُشغَّل من نفس الجهاز حتى بعد إغلاق التطبيق.
  *
- * === إعادة تصميم معماري: التسجيل مرتبط بالسورة، وليس بالصفحة ===
- * كل تسجيل الآن مرتبط بسورة أولاً (Surah ID)، ثم بالصفحة/الصفحات التي
- * تخصّه. هذا يمنع نهائيًا تعارض تسجيلات السور التي تشترك في نفس الصفحة
- * (مثال: صفحة 545 تضم نهاية سورة المجادلة وبداية سورة الحشر).
- *
- * ثلاث طبقات تسجيل/تشغيل:
- *  - وضع "صفحة": تسجيل مستقل لكل صفحة *ضمن سورتها*. إن ضمّت الصفحة أكثر
- *    من سورة (كصفحة 545)، تُعرض بطاقة مستقلة لكل سورة على تلك الصفحة،
- *    ولكل بطاقة تسجيلها وتشغيلها وحذفها ومشاركتها الخاصة، دون أي تأثير
- *    من إحداها على الأخرى.
- *  - وضع "سورة كاملة": تسجيل متصل واحد يغطي كل صفحات السورة، مع إمكانية
- *    تقليب الصفحات أثناء التسجيل دون قطعه.
- *  - "قائمة الاستماع": اختيار عدة مقاطع (صفحات و/أو سور مسجّلة) وتشغيلها
- *    الواحد تلو الآخر تلقائيًا بترتيب الاختيار.
- *
- * التسجيلات القديمة (المحفوظة برقم الصفحة فقط قبل هذا الإصلاح) تُرحَّل
- * تلقائيًا مرة واحدة عند أول تشغيل بعد التحديث (انظر migrateLegacyRecordings)،
- * وأي تسجيل قديم يتعذّر تحديد سورته تلقائيًا (لأن صفحته تضم أكثر من سورة)
- * يُترك في قسم "تسجيلات تحتاج إلى تعيين" ليختاره المستخدم يدويًا مرة واحدة.
- *
- * أثناء التسجيل، تبقى الشاشة مضاءة (Screen Wake Lock) حتى لا تُقفَل تلقائيًا
- * في منتصف التسجيل.
+ * أربع طبقات تسجيل/تشغيل واختبار:
+ *  - وضع "صفحة": تسجيل مستقل لكل صفحة.
+ *  - وضع "سورة كاملة": تسجيل متصل واحد يغطي كل صفحات السورة.
+ *  - وضع "حزب كامل": تسجيل متصل واحد يغطي كل صفحات الحزب (جديد).
+ *  - "قائمة الاستماع": اختيار عدة مقاطع (صفحات/سور/أحزاب) وتشغيلها تباعًا،
+ *    مع تحكّم كامل لكل عنصر (تشغيل/إيقاف مؤقت/إعادة/إعادة تسجيل/حذف).
+ *  - "اختبار حفظ الأحزاب": اختبار تسميع صوتي بلا تصحيح آلي (جديد).
  */
 
-(async () => {
+(() => {
   "use strict";
 
   const TOTAL_PAGES = 604;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 62; // نفس نصف قطر دائرة الـ SVG
+  const QUESTIONS_PER_ATTEMPT = 30;
+
+  // أي خطأ غير متوقّع (بما فيه أخطاء لم تُتوقَّع أثناء الكتابة) يظهر كرسالة قصيرة
+  // بدل أن يفشل الزر بصمت دون أي إشارة لسبب المشكلة — يسهّل هذا اكتشاف أي عطل
+  // فعلي يظهر لاحقًا على أجهزة/متصفحات مختلفة.
+  window.addEventListener("error", (e) => {
+    console.error("خطأ غير متوقع:", e.error || e.message);
+    showToastSafe("حدث خطأ غير متوقع: " + ((e.error && e.error.message) || e.message || "غير معروف"));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("خطأ غير معالَج (Promise):", e.reason);
+    showToastSafe("حدث خطأ غير متوقع: " + ((e.reason && e.reason.message) || String(e.reason)));
+  });
+  function showToastSafe(msg) {
+    try { showToast(msg); } catch (e) { /* toast نفسه غير متاح بعد */ }
+  }
 
   // ===== عناصر DOM =====
   const el = {
     modeTabs: document.getElementById("modeTabs"),
     modePageBtn: document.getElementById("modePageBtn"),
     modeSurahBtn: document.getElementById("modeSurahBtn"),
+    modeHizbBtn: document.getElementById("modeHizbBtn"),
 
     pageNav: document.getElementById("pageNav"),
     pageInput: document.getElementById("pageInput"),
@@ -48,17 +50,26 @@
     surahRangeControls: document.getElementById("surahRangeControls"),
     surahShrinkBtn: document.getElementById("surahShrinkBtn"),
     surahExtendBtn: document.getElementById("surahExtendBtn"),
+    hizbPicker: document.getElementById("hizbPicker"),
+    hizbSelect: document.getElementById("hizbSelect"),
+    hizbRange: document.getElementById("hizbRange"),
     prevPage: document.getElementById("prevPage"),
     nextPage: document.getElementById("nextPage"),
     pageNumberLabel: document.getElementById("pageNumberLabel"),
     recordedBadge: document.getElementById("recordedBadge"),
 
-    pageSurahList: document.getElementById("pageSurahList"),
-    pageSurahListBody: document.getElementById("pageSurahListBody"),
-
     pageImageWrap: document.getElementById("pageImageWrap"),
     pageImage: document.getElementById("pageImage"),
     pageImagePlaceholder: document.getElementById("pageImagePlaceholder"),
+    errorMarksLayer: document.getElementById("errorMarksLayer"),
+    errorCountBadge: document.getElementById("errorCountBadge"),
+    markErrorModeBtn: document.getElementById("markErrorModeBtn"),
+    markModeHint: document.getElementById("markModeHint"),
+    errorStatsBtn: document.getElementById("errorStatsBtn"),
+    errorStatsModal: document.getElementById("errorStatsModal"),
+    closeErrorStatsModal: document.getElementById("closeErrorStatsModal"),
+    errorStatsBody: document.getElementById("errorStatsBody"),
+    errorStatsList: document.getElementById("errorStatsList"),
     lightbox: document.getElementById("lightbox"),
     lightboxImg: document.getElementById("lightboxImg"),
 
@@ -104,12 +115,6 @@
     clearPlaylistBtn: document.getElementById("clearPlaylistBtn"),
     startPlaylistBtn: document.getElementById("startPlaylistBtn"),
 
-    pendingBtn: document.getElementById("pendingBtn"),
-    pendingBtnLabel: document.getElementById("pendingBtnLabel"),
-    pendingModal: document.getElementById("pendingModal"),
-    closePendingModal: document.getElementById("closePendingModal"),
-    pendingBody: document.getElementById("pendingBody"),
-
     queueBar: document.getElementById("queueBar"),
     queuePosition: document.getElementById("queuePosition"),
     queueLabel: document.getElementById("queueLabel"),
@@ -118,15 +123,65 @@
     queueStopBtn: document.getElementById("queueStopBtn"),
 
     toast: document.getElementById("toast"),
+    fileProtocolWarning: document.getElementById("fileProtocolWarning"),
+    dismissFileWarning: document.getElementById("dismissFileWarning"),
+
+    // نافذة التأكيد العامة
+    confirmModal: document.getElementById("confirmModal"),
+    confirmMessage: document.getElementById("confirmMessage"),
+    confirmCancelBtn: document.getElementById("confirmCancelBtn"),
+    confirmOkBtn: document.getElementById("confirmOkBtn"),
+
+    // اختبار حفظ الأحزاب
+    hizbTestBtn: document.getElementById("hizbTestBtn"),
+    hizbTestModal: document.getElementById("hizbTestModal"),
+    closeHizbTestModal: document.getElementById("closeHizbTestModal"),
+    hizbTestSetup: document.getElementById("hizbTestSetup"),
+    hizbTestSelect: document.getElementById("hizbTestSelect"),
+    hizbTestStartBtn: document.getElementById("hizbTestStartBtn"),
+    hizbTestCoverage: document.getElementById("hizbTestCoverage"),
+    hizbTestRun: document.getElementById("hizbTestRun"),
+    hizbTestProgressText: document.getElementById("hizbTestProgressText"),
+    hizbTestProgressFill: document.getElementById("hizbTestProgressFill"),
+    hizbTestQMeta: document.getElementById("hizbTestQMeta"),
+    hizbTestPrefixText: document.getElementById("hizbTestPrefixText"),
+    hizbTestViewPageBtn: document.getElementById("hizbTestViewPageBtn"),
+    hizbAnswerRecordBtn: document.getElementById("hizbAnswerRecordBtn"),
+    hizbAnswerStopBtn: document.getElementById("hizbAnswerStopBtn"),
+    hizbAnswerTimer: document.getElementById("hizbAnswerTimer"),
+    hizbTestSkipBtn: document.getElementById("hizbTestSkipBtn"),
+    hizbTestNextBtn: document.getElementById("hizbTestNextBtn"),
+    hizbTestEndEarlyBtn: document.getElementById("hizbTestEndEarlyBtn"),
+    hizbTestReview: document.getElementById("hizbTestReview"),
+    hizbTestReviewList: document.getElementById("hizbTestReviewList"),
+    hizbTestNewAttemptBtn: document.getElementById("hizbTestNewAttemptBtn"),
+
+    // حالة الحفظ
+    reminderBtn: document.getElementById("reminderBtn"),
+    reminderModal: document.getElementById("reminderModal"),
+    closeReminderModal: document.getElementById("closeReminderModal"),
+    reminderBody: document.getElementById("reminderBody"),
+    statusSummaryRow: document.getElementById("statusSummaryRow"),
+    statusGrid: document.getElementById("statusGrid"),
+
+    // سجل التقدّم الصوتي
+    progressLogBtn: document.getElementById("progressLogBtn"),
+    progressLogModal: document.getElementById("progressLogModal"),
+    closeProgressLogModal: document.getElementById("closeProgressLogModal"),
+    progressLogTargetLabel: document.getElementById("progressLogTargetLabel"),
+    progressLogBody: document.getElementById("progressLogBody"),
+    progressLogCompareRow: document.getElementById("progressLogCompareRow"),
+    compareOldestNewestBtn: document.getElementById("compareOldestNewestBtn"),
+    progressLogList: document.getElementById("progressLogList"),
   };
 
   // ===== الحالة =====
   const state = {
-    mode: "page", // "page" | "surah"
+    mode: "page", // "page" | "surah" | "hizb"
     currentPage: 1,
     currentSurah: null, // عنصر من QURAN_SURAHS عند وضع السورة
-    pageSurahs: [], // كل السور المتداخلة مع الصفحة الحالية (وضع الصفحة) — غالبًا سورة واحدة، وأحيانًا 2 أو 3
-    recordTarget: { type: "page", id: 1, surahId: 1 },
+    currentHizb: null, // عنصر من QURAN_AHZAB عند وضع الحزب
+    recordTarget: { type: "page", id: 1 },
 
     mediaRecorder: null,
     chunks: [],
@@ -144,9 +199,22 @@
     repeatDone: 0,
     isPlaying: false,
 
-    playlistSelection: [], // [{type:'page'|'surah', id, surahId, label}] بترتيب الاختيار
+    playlistSelection: [], // [{type:'page'|'surah'|'hizb', id, label}] بترتيب الاختيار
     quiz: { juz: null, correctOrder: [], sequence: [], checked: false },
     queue: null, // { items: [...], index }
+
+    // معاينة سريعة لعنصر واحد داخل قائمة الاستماع (منفصلة عن مشغّل الصفحة الرئيسي)
+    preview: { audio: new Audio(), type: null, id: null, url: null },
+
+    // معاينة نسخة واحدة من سجل التقدّم (منفصلة عن كل ما سبق)
+    historyPreview: { audio: new Audio(), entryId: null, btn: null, url: null },
+
+    // اختبار حفظ الأحزاب
+    hizbTest: {
+      hizb: null, attemptId: null, questions: [], index: 0,
+      answers: {}, // qid -> {blob, duration, mimeType}
+    },
+    testMediaRecorder: null, testChunks: [], testRecordStart: 0, testRecordTimerHandle: null, testStream: null,
   };
 
   state.audio.preservesPitch = true;
@@ -159,6 +227,14 @@
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return m + ":" + String(s).padStart(2, "0");
+  }
+
+  const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
+  // تنسيق يدوي بأرقام عادية (0-9) بدل الأرقام الهندية التي قد تُنتجها toLocaleDateString
+  // تلقائيًا حسب لغة النظام — للحفاظ على نفس نمط الأرقام المستخدم في بقية التطبيق
+  function formatArabicDate(timestamp) {
+    const d = new Date(timestamp);
+    return `${d.getDate()} ${ARABIC_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
   }
 
   function pageImageSrc(pageNum) {
@@ -174,6 +250,7 @@
       el.pageImage.classList.remove("hidden");
       el.pageImagePlaceholder.classList.add("hidden");
       el.pageImageWrap.classList.add("has-image");
+      repositionAllMarks();
     };
     tester.onerror = () => {
       if (state.currentPage !== pageNum) return;
@@ -183,6 +260,7 @@
       el.pageImageWrap.classList.remove("has-image");
     };
     tester.src = src;
+    loadErrorMarksForPage(pageNum);
   }
 
   let toastTimer = null;
@@ -210,6 +288,70 @@
     }
   }
 
+  // خطأ بنيوي معروف: قاعدة بيانات محلية قديمة (من نسخة سابقة من التطبيق) ينقصها
+  // أحد الجداول الجديدة. الترقية التلقائية تُصلح هذا عادةً بمجرد تحديث رقم
+  // إصدار قاعدة البيانات، لكن نوفّر أيضًا مسارًا يدويًا صريحًا للتعافي الفوري
+  // دون انتظار تحديث الصفحة، تحسّبًا لأي حالة غير متوقعة.
+  function isStructuralDbError(err) {
+    const msg = (err && (err.message || String(err))) || "";
+    return (err && err.name === "NotFoundError") || /object stores? was not found/i.test(msg);
+  }
+
+  function renderDbRecoveryAction(container, err) {
+    container.innerHTML = "";
+    const p = document.createElement("p");
+    p.className = "playlist-empty";
+    p.textContent = "حدثت مشكلة في قاعدة البيانات المحلية القديمة على هذا الجهاز (رسالة النظام: " +
+      ((err && err.message) || "") + "). عادة يكفي تحديث الصفحة لإصلاحها تلقائيًا.";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ctrl-btn primary";
+    btn.style.margin = "10px auto";
+    btn.style.display = "block";
+    btn.textContent = "إصلاح فوري (تحديث الصفحة)";
+    btn.addEventListener("click", () => window.location.reload());
+    const btn2 = document.createElement("button");
+    btn2.type = "button";
+    btn2.className = "ctrl-btn danger";
+    btn2.style.margin = "8px auto 0";
+    btn2.style.display = "block";
+    btn2.textContent = "لم يُجدِ ذلك؟ إعادة ضبط كل التسجيلات المحفوظة محليًا";
+    btn2.addEventListener("click", async () => {
+      const ok = await showConfirm("سيؤدي هذا لحذف كل التسجيلات الصوتية المحفوظة على هذا الجهاز نهائيًا، ولا يمكن التراجع عنه. هل تريد المتابعة؟");
+      if (!ok) return;
+      try {
+        await QuranDB.resetAll();
+        window.location.reload();
+      } catch (e) {
+        showToast("تعذّر إعادة الضبط: " + ((e && e.message) || "أغلق التبويبات الأخرى لهذا التطبيق وأعد المحاولة"));
+      }
+    });
+    container.appendChild(p);
+    container.appendChild(btn);
+    container.appendChild(btn2);
+  }
+
+  // ===== نافذة تأكيد عامة (تُستبدل بها confirm() الافتراضية للحذف) =====
+  function showConfirm(message) {
+    return new Promise((resolve) => {
+      el.confirmMessage.textContent = message;
+      el.confirmModal.classList.remove("hidden");
+      const cleanup = (result) => {
+        el.confirmModal.classList.add("hidden");
+        el.confirmOkBtn.removeEventListener("click", onOk);
+        el.confirmCancelBtn.removeEventListener("click", onCancel);
+        el.confirmModal.removeEventListener("click", onOverlay);
+        resolve(result);
+      };
+      const onOk = () => cleanup(true);
+      const onCancel = () => cleanup(false);
+      const onOverlay = (e) => { if (e.target === el.confirmModal) cleanup(false); };
+      el.confirmOkBtn.addEventListener("click", onOk);
+      el.confirmCancelBtn.addEventListener("click", onCancel);
+      el.confirmModal.addEventListener("click", onOverlay);
+    });
+  }
+
   // ===== تحميل/إرسال التسجيلات (لإرسالها للمعلّمة) =====
   function extFromMime(mime) {
     if (!mime) return "webm";
@@ -222,18 +364,17 @@
     return String(str).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
   }
 
-  // type: "surah" (سورة كاملة) أو "page" (صفحة ضمن سورة، يحتاج surahId)
-  function buildRecordingFileName(type, id, mime, surahId) {
+  function buildRecordingFileName(type, id, mime) {
     const ext = extFromMime(mime);
     if (type === "surah") {
       const surah = surahByNumber(id);
       const name = surah ? sanitizeFileName(surah.name) : id;
       return `سورة-${id}-${name}.${ext}`;
     }
-    const surah = surahByNumber(surahId);
-    if (surah) {
-      // يضمن اسم الملف عدم أي تعارض حتى لو تشاركت سورتان نفس رقم الصفحة
-      return `سورة-${surahId}-${sanitizeFileName(surah.name)}-صفحة-${id}.${ext}`;
+    if (type === "hizb") {
+      const hizb = hizbByNumber(id);
+      const name = hizb ? sanitizeFileName(hizb.name) : id;
+      return `${name}.${ext}`;
     }
     return `صفحة-${id}.${ext}`;
   }
@@ -265,16 +406,24 @@
     triggerDownload(blob, filename);
   }
 
-  // type: "surah" أو "page". لـ "page" يجب تمرير surahId لتحديد أي تسجيل بالضبط.
-  async function downloadRecordingFor(type, id, label, surahId) {
-    const rec = type === "surah"
-      ? await QuranDB.getSurahRecording(id)
-      : await QuranDB.getPageRecording(surahId, id);
+  async function getRecordByType(type, id) {
+    if (type === "surah") return QuranDB.getSurahRecording(id);
+    if (type === "hizb") return QuranDB.getHizbRecording(id);
+    return QuranDB.getRecording(id);
+  }
+  async function deleteRecordByType(type, id) {
+    if (type === "surah") return QuranDB.deleteSurahRecording(id);
+    if (type === "hizb") return QuranDB.deleteHizbRecording(id);
+    return QuranDB.deleteRecording(id);
+  }
+
+  async function downloadRecordingFor(type, id, label) {
+    const rec = await getRecordByType(type, id);
     if (!rec || !rec.blob) {
       showToast("لا يوجد تسجيل لتحميله");
       return;
     }
-    const filename = buildRecordingFileName(type, id, rec.mimeType || rec.blob.type, surahId);
+    const filename = buildRecordingFileName(type, id, rec.mimeType || rec.blob.type);
     await shareOrDownloadBlob(rec.blob, filename, label);
   }
 
@@ -284,7 +433,7 @@
     </svg>`;
   }
 
-  // ===== اختبار ترتيب السور في كل جزء =====
+  // ===== اختبار ترتيب السور في كل جزء (ميزة موجودة سابقًا — بلا تغيير) =====
   function populateQuizJuzSelect() {
     el.quizJuzSelect.innerHTML = "";
     QURAN_JUZ.forEach((j) => {
@@ -328,7 +477,6 @@
     el.quizResult.textContent = "";
     el.quizResult.className = "quiz-result hidden";
 
-    // منطقة التسلسل الذي بناه المستخدم
     el.quizSequence.innerHTML = "";
     if (q.sequence.length === 0) {
       const hint = document.createElement("span");
@@ -352,7 +500,6 @@
       });
     }
 
-    // مجموعة السور المتبقية (لم تُختر بعد)
     el.quizChips.innerHTML = "";
     const remaining = q.shuffled.filter((n) => !q.sequence.includes(n));
     remaining.forEach((num) => {
@@ -400,9 +547,6 @@
   // ===== أدوات السور =====
   const SURAH_OVERRIDES_KEY = "quran-surah-overrides";
 
-  // يطبّق أي تصحيحات حفظها المستخدم سابقًا لحدود بعض السور (صفحة النهاية)
-  // فوق البيانات الافتراضية في surahs.js، لأن بعض السور قد تمتد فعليًا
-  // لصفحة إضافية مقارنةً بما هو مُدخل مسبقًا.
   function loadSurahOverrides() {
     let overrides = {};
     try { overrides = JSON.parse(localStorage.getItem(SURAH_OVERRIDES_KEY) || "{}"); } catch (e) { overrides = {}; }
@@ -426,14 +570,8 @@
   function surahByNumber(n) {
     return QURAN_SURAHS.find((s) => s.number === n) || null;
   }
-  // أول سورة تخص هذه الصفحة (استخدام: تخمين افتراضي، تبديل الوضع)
   function surahForPage(p) {
     return QURAN_SURAHS.find((s) => p >= s.startPage && p <= s.endPage) || QURAN_SURAHS[0];
-  }
-  // كل السور التي تتداخل مع هذه الصفحة (قد تكون أكثر من واحدة)
-  function surahsForPage(p) {
-    const list = QURAN_SURAHS.filter((s) => p >= s.startPage && p <= s.endPage);
-    return list.length ? list : [surahForPage(p)];
   }
   function populateSurahSelect() {
     const frag = document.createDocumentFragment();
@@ -446,7 +584,26 @@
     el.surahSelect.appendChild(frag);
   }
 
-  // ===== تحديث الصوت من سجل محفوظ (صفحة أو سورة) =====
+  // ===== أدوات الأحزاب (جديد) =====
+  function hizbByNumber(n) {
+    return QURAN_AHZAB.find((h) => h.number === n) || null;
+  }
+  function hizbForPage(p) {
+    return QURAN_AHZAB.find((h) => p >= h.startPage && p <= h.endPage) || QURAN_AHZAB[0];
+  }
+  function populateHizbSelect(selectEl) {
+    selectEl.innerHTML = "";
+    const frag = document.createDocumentFragment();
+    QURAN_AHZAB.forEach((h) => {
+      const opt = document.createElement("option");
+      opt.value = String(h.number);
+      opt.textContent = `${h.number}. ${h.name}`;
+      frag.appendChild(opt);
+    });
+    selectEl.appendChild(frag);
+  }
+
+  // ===== تحديث الصوت من سجل محفوظ (صفحة/سورة/حزب) =====
   async function setAudioFromRecord(rec) {
     if (state.currentObjectUrl) {
       URL.revokeObjectURL(state.currentObjectUrl);
@@ -480,30 +637,21 @@
     setPlayIconState(false);
   }
 
-  // ===== تبديل الوضع (صفحة / سورة) =====
+  // ===== تبديل الوضع (صفحة / سورة / حزب) =====
   function setModeUI(mode) {
     state.mode = mode;
     el.modePageBtn.classList.toggle("active", mode === "page");
     el.modeSurahBtn.classList.toggle("active", mode === "surah");
+    el.modeHizbBtn.classList.toggle("active", mode === "hizb");
     el.pagePicker.classList.toggle("hidden", mode !== "page");
     el.surahPicker.classList.toggle("hidden", mode !== "surah");
+    el.hizbPicker.classList.toggle("hidden", mode !== "hizb");
     el.surahRange.classList.toggle("hidden", mode !== "surah");
     el.surahRangeControls.classList.toggle("hidden", mode !== "surah");
-    el.surahRecordHint.classList.toggle("hidden", mode !== "surah");
-    if (mode !== "page") el.pageSurahList.classList.add("hidden");
-    el.recordBtnText.textContent = mode === "surah" ? "تسجيل السورة كاملة" : "تسجيل الصفحة";
+    el.hizbRange.classList.toggle("hidden", mode !== "hizb");
+    el.surahRecordHint.classList.toggle("hidden", mode === "page");
+    el.recordBtnText.textContent = mode === "surah" ? "تسجيل السورة كاملة" : mode === "hizb" ? "تسجيل الحزب كاملاً" : "تسجيل الصفحة";
     try { localStorage.setItem("quran-last-mode", mode); } catch (e) { /* تجاهل */ }
-  }
-
-  // يحدّث نص زر التسجيل ليوضّح لأي سورة سيكون التسجيل، فقط عندما تضمّ
-  // الصفحة الحالية أكثر من سورة (تجنّبًا لأي لبس بين بطاقات الصفحة).
-  function updateRecordBtnTextForPage(surahId) {
-    if (state.pageSurahs.length > 1) {
-      const s = surahByNumber(surahId);
-      el.recordBtnText.textContent = s ? `تسجيل: سورة ${s.name}` : "تسجيل الصفحة";
-    } else {
-      el.recordBtnText.textContent = "تسجيل الصفحة";
-    }
   }
 
   // ===== تحميل صفحة (وضع الصفحة) =====
@@ -515,93 +663,18 @@
 
     state.mode = "page";
     state.currentSurah = null;
+    state.currentHizb = null;
     state.currentPage = pageNum;
-
-    const surahsOnPage = surahsForPage(pageNum);
-    state.pageSurahs = surahsOnPage;
-    const defaultSurah = surahsOnPage[0];
-    state.recordTarget = { type: "page", id: pageNum, surahId: defaultSurah.number };
+    state.recordTarget = { type: "page", id: pageNum };
 
     el.pageInput.value = pageNum;
-    el.pageNumberLabel.textContent = surahsOnPage.length > 1
-      ? `الصفحة ${pageNum} — سورة ${defaultSurah.name}`
-      : "الصفحة " + pageNum;
-    updateRecordBtnTextForPage(defaultSurah.number);
+    el.pageNumberLabel.textContent = "الصفحة " + pageNum;
 
     try { localStorage.setItem("quran-last-page", String(pageNum)); } catch (e) { /* تجاهل */ }
 
     loadPageImage(pageNum);
-    await renderPageSurahList(pageNum, surahsOnPage, defaultSurah.number);
 
-    const rec = await QuranDB.getPageRecording(defaultSurah.number, pageNum);
-    await setAudioFromRecord(rec);
-  }
-
-  // ===== بطاقات السور المتعددة على نفس الصفحة =====
-  // تُعرض فقط عندما تضم الصفحة الحالية أكثر من سورة واحدة (كصفحة 545: نهاية
-  // المجادلة وبداية الحشر). لكل سورة بطاقتها المستقلة تمامًا: تشغيل، تسجيل/
-  // إعادة تسجيل، حذف، تحميل/مشاركة — دون أي تأثير على بطاقات السور الأخرى.
-  async function renderPageSurahList(pageNum, surahsOnPage, selectedSurahId) {
-    if (!surahsOnPage || surahsOnPage.length <= 1) {
-      el.pageSurahList.classList.add("hidden");
-      el.pageSurahListBody.innerHTML = "";
-      return;
-    }
-    el.pageSurahList.classList.remove("hidden");
-
-    const existing = await QuranDB.getRecordingsForPage(pageNum);
-    const recordedSet = new Set(existing.map((r) => r.surahId));
-
-    el.pageSurahListBody.innerHTML = "";
-    surahsOnPage.forEach((s) => {
-      const isRecorded = recordedSet.has(s.number);
-
-      const wrap = document.createElement("div");
-      wrap.className = "playlist-item-row";
-
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "playlist-item" + (s.number === selectedSurahId ? " selected" : "");
-      row.dataset.surah = String(s.number);
-      row.innerHTML =
-        `<span class="playlist-item-badge${isRecorded ? " active" : ""}">${isRecorded ? "✓" : ""}</span>` +
-        `<span class="playlist-item-label">سورة ${s.name}${isRecorded ? "" : " — لم تُسجَّل بعد"}</span>`;
-      row.addEventListener("click", () => selectPageSurah(s.number));
-      wrap.appendChild(row);
-
-      if (isRecorded) {
-        const dlBtn = document.createElement("button");
-        dlBtn.type = "button";
-        dlBtn.className = "playlist-item-download";
-        dlBtn.setAttribute("aria-label", `تحميل أو مشاركة تسجيل سورة ${s.name}`);
-        dlBtn.innerHTML = downloadIconSVG();
-        dlBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          downloadRecordingFor("page", pageNum, `سورة ${s.name} — صفحة ${pageNum}`, s.number);
-        });
-        wrap.appendChild(dlBtn);
-      }
-
-      el.pageSurahListBody.appendChild(wrap);
-    });
-  }
-
-  // يختار المستخدم سورة معينة من بطاقات صفحة تضم عدة سور، فتصبح هي هدف
-  // التسجيل/التشغيل/الحذف/التحميل الحالي، دون أي تأثير على السور الأخرى.
-  async function selectPageSurah(surahId) {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
-      showToast("أوقف التسجيل الحالي أولًا");
-      return;
-    }
-    stopPlayback();
-    const surah = surahByNumber(surahId);
-    state.recordTarget = { type: "page", id: state.currentPage, surahId };
-    el.pageNumberLabel.textContent = surah
-      ? `الصفحة ${state.currentPage} — سورة ${surah.name}`
-      : "الصفحة " + state.currentPage;
-    updateRecordBtnTextForPage(surahId);
-    await renderPageSurahList(state.currentPage, state.pageSurahs, surahId);
-    const rec = await QuranDB.getPageRecording(surahId, state.currentPage);
+    const rec = await QuranDB.getRecording(pageNum);
     await setAudioFromRecord(rec);
   }
 
@@ -615,6 +688,7 @@
 
     state.mode = "surah";
     state.currentSurah = surah;
+    state.currentHizb = null;
     state.currentPage = surah.startPage;
     state.recordTarget = { type: "surah", id: surah.number };
 
@@ -632,6 +706,36 @@
     await setAudioFromRecord(rec);
   }
 
+  // ===== تحميل حزب كامل (وضع الحزب) — جديد =====
+  async function loadHizb(hizbNumber) {
+    const hizb = hizbByNumber(hizbNumber);
+    if (!hizb) return;
+    stopQueueIfActive();
+    stopPlayback();
+    stopRecordingIfActive(true);
+
+    state.mode = "hizb";
+    state.currentHizb = hizb;
+    state.currentSurah = null;
+    state.currentPage = hizb.startPage;
+    state.recordTarget = { type: "hizb", id: hizb.number };
+
+    el.hizbSelect.value = String(hizb.number);
+    el.pageNumberLabel.textContent = `${hizb.name} — صفحة ${hizb.startPage}`;
+    const pageCount = hizb.endPage - hizb.startPage + 1;
+    const spanTxt = hizb.startSurahName === hizb.endSurahName
+      ? `سورة ${hizb.startSurahName}`
+      : `من سورة ${hizb.startSurahName} إلى سورة ${hizb.endSurahName}`;
+    el.hizbRange.textContent = `${spanTxt} — من صفحة ${hizb.startPage} إلى ${hizb.endPage} (${pageCount} صفحة)`;
+
+    try { localStorage.setItem("quran-last-hizb", String(hizb.number)); } catch (e) { /* تجاهل */ }
+
+    loadPageImage(hizb.startPage);
+
+    const rec = await QuranDB.getHizbRecording(hizb.number);
+    await setAudioFromRecord(rec);
+  }
+
   function updateSurahRangeButtonsState() {
     if (!state.currentSurah) return;
     const surah = state.currentSurah;
@@ -639,9 +743,6 @@
     el.surahExtendBtn.disabled = surah.endPage >= TOTAL_PAGES;
   }
 
-  // تصحيح يدوي لحدود السورة: عند مراجعة صور المصحف قد يتبيّن أن السورة
-  // تمتد فعليًا لصفحة إضافية (حتى لو جزءًا صغيرًا منها) قبل بداية السورة
-  // التالية، أو العكس. يُحفظ التصحيح محليًا ليبقى بعد إعادة فتح التطبيق.
   function adjustSurahEndPage(delta) {
     if (!state.currentSurah) return;
     const surah = state.currentSurah;
@@ -655,7 +756,7 @@
     showToast(delta > 0 ? "تمت إضافة الصفحة التالية لهذه السورة" : "تم إرجاع آخر صفحة من هذه السورة");
   }
 
-  // تقليب صفحات داخل السورة الحالية دون قطع التسجيل أو التشغيل الجاري
+  // تقليب صفحات داخل السورة/الحزب الحالي دون قطع التسجيل أو التشغيل الجاري
   function flipSurahPage(delta) {
     if (!state.currentSurah) return;
     const target = state.currentPage + delta;
@@ -665,41 +766,16 @@
     loadPageImage(target);
   }
 
-  // ===== قفل الشاشة أثناء التسجيل (Screen Wake Lock) =====
-  // يمنع إطفاء/قفل الشاشة تلقائيًا أثناء التسجيل حتى لا ينقطع التسجيل أو
-  // يحتاج المستخدم لمس الشاشة باستمرار لإبقائها مضاءة. يُحرَّر فور إيقاف
-  // التسجيل. بعض المتصفحات لا تدعم هذه الخاصية بعد، فيُتجاهل الخطأ بصمت
-  // (التسجيل نفسه يبقى يعمل طبيعيًا حتى بلا هذه الميزة).
-  let wakeLock = null;
-
-  async function acquireWakeLock() {
-    if (!("wakeLock" in navigator)) return;
-    try {
-      wakeLock = await navigator.wakeLock.request("screen");
-      wakeLock.addEventListener("release", () => { wakeLock = null; });
-    } catch (err) {
-      wakeLock = null;
-    }
+  function flipHizbPage(delta) {
+    if (!state.currentHizb) return;
+    const target = state.currentPage + delta;
+    if (target < state.currentHizb.startPage || target > state.currentHizb.endPage) return;
+    state.currentPage = target;
+    el.pageNumberLabel.textContent = `${state.currentHizb.name} — صفحة ${target}`;
+    loadPageImage(target);
   }
 
-  async function releaseWakeLock() {
-    if (!wakeLock) return;
-    try { await wakeLock.release(); } catch (e) { /* تجاهل */ }
-    wakeLock = null;
-  }
-
-  // المتصفح يُحرِّر قفل الشاشة تلقائيًا عند إخفاء الصفحة (تبديل التطبيق أو
-  // إطفاء الشاشة يدويًا)، ولا يُعيده تلقائيًا عند العودة. فإن كان التسجيل
-  // ما يزال جاريًا عند عودة ظهور الصفحة، نطلبه من جديد فورًا.
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" &&
-        state.mediaRecorder && state.mediaRecorder.state === "recording" &&
-        !wakeLock) {
-      acquireWakeLock();
-    }
-  });
-
-  // ===== التسجيل =====
+  // ===== التسجيل (صفحة/سورة/حزب) =====
   async function startRecording() {
     if (state.isPlaying) stopPlayback();
     if (state.queue) return; // لا تسجيل أثناء قائمة استماع نشطة
@@ -732,11 +808,7 @@
       return;
     }
 
-    const target = {
-      type: state.recordTarget.type,
-      id: state.recordTarget.id,
-      surahId: state.recordTarget.surahId,
-    };
+    const target = { type: state.recordTarget.type, id: state.recordTarget.id };
 
     state.mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) state.chunks.push(e.data);
@@ -746,46 +818,47 @@
       const blob = new Blob(state.chunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
       const duration = (Date.now() - state.recordStartTime) / 1000;
 
+      // نجلب سجل النسخ السابقة قبل إضافة هذه النسخة، لمقارنة مدة هذا التسجيل بمعتادها
+      let priorHistory = [];
+      try { priorHistory = await QuranDB.getHistoryForTarget(target.type, target.id); } catch (e) { /* تجاهل */ }
+
       if (target.type === "surah") {
-        const surah = surahByNumber(target.id);
-        await QuranDB.saveSurahRecording(target.id, blob, duration, {
-          surahName: surah ? surah.name : null,
-          startPage: surah ? surah.startPage : null,
-          endPage: surah ? surah.endPage : null,
-        });
-        showToast("تم حفظ تسجيل السورة كاملة");
+        await QuranDB.saveSurahRecording(target.id, blob, duration);
+      } else if (target.type === "hizb") {
+        const hizb = hizbByNumber(target.id);
+        await QuranDB.saveHizbRecording(target.id, blob, duration, hizb ? {
+          hizbName: hizb.name, startSurahName: hizb.startSurahName, endSurahName: hizb.endSurahName,
+          startPage: hizb.startPage, endPage: hizb.endPage,
+        } : null);
       } else {
-        const surah = surahByNumber(target.surahId);
-        await QuranDB.savePageRecording({
-          surahId: target.surahId,
-          surahName: surah ? surah.name : null,
-          page: target.id,
-          startPage: target.id,
-          endPage: target.id,
-          blob,
-          duration,
-        });
+        await QuranDB.saveRecording(target.id, blob, duration);
+      }
+
+      // سجل التقدّم: يُضاف كنسخة جديدة، لا يستبدل أي شيء — لا يؤثر على الحفظ أعلاه إن فشل
+      try {
+        await QuranDB.saveHistoryEntry({ type: target.type, targetId: target.id, blob, duration, label: targetLabel(target.type, target.id) });
+      } catch (e) { /* تجاهل — الحفظ الأساسي أهم ونجح فعلاً */ }
+
+      const anomaly = computeDurationAnomaly(priorHistory, duration);
+      if (anomaly.isAnomaly) {
+        showToast(`⚠️ هذا التسجيل أطول من المعتاد (${formatTime(duration)} مقابل ${formatTime(anomaly.avgDuration)} عادة) — راجعه في «سجل التقدّم»`);
+      } else if (target.type === "surah") {
+        showToast("تم حفظ تسجيل السورة كاملة");
+      } else if (target.type === "hizb") {
+        showToast("تم حفظ تسجيل الحزب كاملاً");
+      } else {
         showToast("تم حفظ التسجيل");
       }
 
       state.stream.getTracks().forEach((t) => t.stop());
       state.stream = null;
-      releaseWakeLock();
-
-      if (target.type === "surah") {
-        loadSurah(target.id);
-      } else {
-        // نحدّث الصفحة نفسها لكن نبقي التحديد على نفس السورة التي سُجِّلت للتو
-        // (بدل الرجوع افتراضيًا لأول سورة على الصفحة إن كانت غيرها).
-        await renderPageSurahList(target.id, state.pageSurahs, target.surahId);
-        const rec = await QuranDB.getPageRecording(target.surahId, target.id);
-        await setAudioFromRecord(rec);
-      }
+      if (target.type === "surah") loadSurah(target.id);
+      else if (target.type === "hizb") loadHizb(target.id);
+      else loadPage(target.id);
     };
 
     state.mediaRecorder.start();
     state.recordStartTime = Date.now();
-    acquireWakeLock();
 
     el.recordBtn.classList.add("hidden");
     el.stopRecordBtn.classList.remove("hidden");
@@ -794,7 +867,9 @@
     el.deleteBtn.disabled = true;
     el.modePageBtn.disabled = true;
     el.modeSurahBtn.disabled = true;
+    el.modeHizbBtn.disabled = true;
     el.surahSelect.disabled = true;
+    el.hizbSelect.disabled = true;
     el.pageInput.disabled = true;
     el.playlistBtn.disabled = true;
 
@@ -814,13 +889,14 @@
       state.mediaRecorder.stop();
     }
     clearInterval(state.recordTimerHandle);
-    releaseWakeLock();
     el.recordBtn.classList.remove("hidden");
     el.stopRecordBtn.classList.add("hidden");
     el.recTimer.classList.add("hidden");
     el.modePageBtn.disabled = false;
     el.modeSurahBtn.disabled = false;
+    el.modeHizbBtn.disabled = false;
     el.surahSelect.disabled = false;
+    el.hizbSelect.disabled = false;
     el.pageInput.disabled = false;
     el.playlistBtn.disabled = false;
   }
@@ -902,32 +978,52 @@
   });
 
   // ===== قائمة الاستماع (playlist) =====
-  // مفتاح تعريف موحّد لعنصر القائمة، يميّز بين تسجيلات صفحات مختلف السور
-  // حتى لو تشاركت نفس رقم الصفحة (مثال: page:58_545 لا يساوي page:59_545).
-  function playlistKey(type, id, surahId) {
-    return type === "page" ? `page:${surahId}_${id}` : `surah:${id}`;
-  }
-
   async function openPlaylistModal() {
-    const [pageRecs, surahNums] = await Promise.all([
-      QuranDB.getAllPageRecordings(),
-      QuranDB.getAllSurahNumbers(),
-    ]);
-    pageRecs.sort((a, b) => a.page - b.page || a.surahId - b.surahId);
-    surahNums.sort((a, b) => a - b);
-    renderPlaylistBody(pageRecs, surahNums);
     el.playlistModal.classList.remove("hidden");
-  }
-
-  function renderPlaylistBody(pageRecs, surahNums) {
-    el.playlistBody.innerHTML = "";
-    if (pageRecs.length === 0 && surahNums.length === 0) {
+    el.playlistBody.innerHTML = '<p class="playlist-empty">جارٍ التحميل…</p>';
+    try {
+      const [pageNums, surahNums, hizbNums] = await Promise.all([
+        QuranDB.getAllPageNumbers(),
+        QuranDB.getAllSurahNumbers(),
+        QuranDB.getAllHizbNumbers(),
+      ]);
+      pageNums.sort((a, b) => a - b);
+      surahNums.sort((a, b) => a - b);
+      hizbNums.sort((a, b) => a - b);
+      await renderPlaylistBody(pageNums, surahNums, hizbNums);
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.playlistBody, err);
+        return;
+      }
+      el.playlistBody.innerHTML = "";
       const p = document.createElement("p");
       p.className = "playlist-empty";
-      p.textContent = "لا توجد تسجيلات محفوظة بعد. سجّل بعض الصفحات أو السور أولًا.";
+      p.textContent = "تعذّر فتح قائمة الاستماع: " + ((err && err.message) || "خطأ غير معروف") + " — أعد المحاولة.";
+      el.playlistBody.appendChild(p);
+    }
+  }
+
+  async function renderPlaylistBody(pageNums, surahNums, hizbNums) {
+    stopPreview();
+    el.playlistBody.innerHTML = "";
+    if (pageNums.length === 0 && surahNums.length === 0 && hizbNums.length === 0) {
+      const p = document.createElement("p");
+      p.className = "playlist-empty";
+      p.textContent = "لا توجد تسجيلات محفوظة بعد. سجّل بعض الصفحات أو السور أو الأحزاب أولًا.";
       el.playlistBody.appendChild(p);
       updatePlaylistFooter();
       return;
+    }
+    if (hizbNums.length) {
+      const h = document.createElement("div");
+      h.className = "playlist-section-title";
+      h.textContent = "أحزاب مسجَّلة كاملة";
+      el.playlistBody.appendChild(h);
+      hizbNums.forEach((n) => {
+        const hizb = hizbByNumber(n);
+        el.playlistBody.appendChild(makePlaylistItem("hizb", n, hizb ? hizb.name : `الحزب ${n}`));
+      });
     }
     if (surahNums.length) {
       const h = document.createElement("div");
@@ -936,63 +1032,177 @@
       el.playlistBody.appendChild(h);
       surahNums.forEach((n) => {
         const surah = surahByNumber(n);
-        el.playlistBody.appendChild(makePlaylistItem("surah", n, `سورة ${surah ? surah.name : n}`, null));
+        el.playlistBody.appendChild(makePlaylistItem("surah", n, `سورة ${surah ? surah.name : n}`));
       });
     }
-    if (pageRecs.length) {
+    if (pageNums.length) {
       const h = document.createElement("div");
       h.className = "playlist-section-title";
       h.textContent = "صفحات مسجَّلة";
       el.playlistBody.appendChild(h);
-      pageRecs.forEach((r) => {
-        const label = r.surahName ? `صفحة ${r.page} — سورة ${r.surahName}` : `الصفحة ${r.page}`;
-        el.playlistBody.appendChild(makePlaylistItem("page", r.page, label, r.surahId));
+      pageNums.forEach((n) => {
+        el.playlistBody.appendChild(makePlaylistItem("page", n, `الصفحة ${n}`));
       });
     }
   }
 
-  function selectionOrderOf(type, id, surahId) {
-    const key = playlistKey(type, id, surahId);
-    const idx = state.playlistSelection.findIndex((it) => playlistKey(it.type, it.id, it.surahId) === key);
+  async function refreshPlaylistModal() {
+    const [pageNums, surahNums, hizbNums] = await Promise.all([
+      QuranDB.getAllPageNumbers(), QuranDB.getAllSurahNumbers(), QuranDB.getAllHizbNumbers(),
+    ]);
+    pageNums.sort((a, b) => a - b); surahNums.sort((a, b) => a - b); hizbNums.sort((a, b) => a - b);
+    await renderPlaylistBody(pageNums, surahNums, hizbNums);
+  }
+
+  function selectionOrderOf(type, id) {
+    const idx = state.playlistSelection.findIndex((it) => it.type === type && it.id === id);
     return idx === -1 ? null : idx + 1;
   }
 
-  function makePlaylistItem(type, id, label, surahId) {
+  // ----- معاينة صوتية مباشرة لعنصر واحد في قائمة الاستماع -----
+  function stopPreview() {
+    state.preview.audio.pause();
+    state.preview.audio.currentTime = 0;
+    if (state.preview.url) { URL.revokeObjectURL(state.preview.url); state.preview.url = null; }
+    const prevType = state.preview.type, prevId = state.preview.id;
+    state.preview.type = null; state.preview.id = null;
+    if (prevType != null) updatePreviewButtonUI(prevType, prevId, false);
+  }
+
+  function updatePreviewButtonUI(type, id, playing) {
+    const row = el.playlistBody.querySelector(`.playlist-item-row[data-ptype="${type}"][data-pid="${id}"]`);
+    if (!row) return;
+    const playBtn = row.querySelector(".pl-play");
+    if (playBtn) playBtn.textContent = playing ? "⏸" : "▶";
+  }
+
+  async function togglePreview(type, id) {
+    const isSameActive = state.preview.type === type && state.preview.id === id;
+    if (isSameActive && !state.preview.audio.paused) {
+      state.preview.audio.pause();
+      updatePreviewButtonUI(type, id, false);
+      return;
+    }
+    if (isSameActive && state.preview.audio.paused && state.preview.audio.src) {
+      state.preview.audio.play();
+      updatePreviewButtonUI(type, id, true);
+      return;
+    }
+    // تشغيل عنصر مختلف: أوقف أي معاينة سابقة أولًا
+    stopPreview();
+    const rec = await getRecordByType(type, id);
+    if (!rec || !rec.blob) { showToast("لا يوجد تسجيل لتشغيله"); return; }
+    const url = URL.createObjectURL(rec.blob);
+    state.preview.type = type; state.preview.id = id; state.preview.url = url;
+    state.preview.audio.src = url;
+    state.preview.audio.currentTime = 0;
+    state.preview.audio.play();
+    updatePreviewButtonUI(type, id, true);
+  }
+
+  function replayPreview(type, id) {
+    if (state.preview.type === type && state.preview.id === id) {
+      state.preview.audio.currentTime = 0;
+      state.preview.audio.play();
+      updatePreviewButtonUI(type, id, true);
+    } else {
+      togglePreview(type, id);
+    }
+  }
+
+  state.preview.audio.addEventListener("ended", () => {
+    const t = state.preview.type, i = state.preview.id;
+    if (t != null) updatePreviewButtonUI(t, i, false);
+  });
+
+  function goToItemForRerecord(type, id) {
+    el.playlistModal.classList.add("hidden");
+    if (type === "surah") { setModeUI("surah"); loadSurah(id); }
+    else if (type === "hizb") { setModeUI("hizb"); loadHizb(id); }
+    else { setModeUI("page"); loadPage(id); }
+    showToast("جاهز لإعادة التسجيل — اضغط زر التسجيل عند الاستعداد");
+  }
+
+  async function deletePlaylistItem(type, id, label) {
+    const ok = await showConfirm(`هل تريد حذف هذا التسجيل نهائيًا؟\n(${label})`);
+    if (!ok) return;
+    if (state.preview.type === type && state.preview.id === id) stopPreview();
+    await deleteRecordByType(type, id);
+    state.playlistSelection = state.playlistSelection.filter((it) => !(it.type === type && it.id === id));
+    showToast("تم حذف التسجيل");
+    await refreshPlaylistModal();
+    updatePlaylistFooter();
+    // إن كان المستخدم يعرض حاليًا نفس هذا العنصر في الشاشة الرئيسية، حدّث حالته
+    if (state.recordTarget.type === type && state.recordTarget.id === id) {
+      if (type === "surah") loadSurah(id); else if (type === "hizb") loadHizb(id); else loadPage(id);
+    }
+  }
+
+  function makePlaylistItem(type, id, label) {
     const wrap = document.createElement("div");
     wrap.className = "playlist-item-row";
+    wrap.dataset.ptype = type;
+    wrap.dataset.pid = String(id);
 
     const row = document.createElement("button");
     row.type = "button";
     row.className = "playlist-item";
     row.dataset.type = type;
     row.dataset.id = String(id);
-    if (surahId != null) row.dataset.surahId = String(surahId);
-    const order = selectionOrderOf(type, id, surahId);
+    const order = selectionOrderOf(type, id);
     row.classList.toggle("selected", !!order);
     row.innerHTML =
       `<span class="playlist-item-badge${order ? " active" : ""}">${order || ""}</span>` +
       `<span class="playlist-item-label">${label}</span>`;
-    row.addEventListener("click", () => togglePlaylistSelection(type, id, surahId, label));
+    row.addEventListener("click", () => togglePlaylistSelection(type, id, label));
+
+    const controls = document.createElement("div");
+    controls.className = "playlist-item-controls";
+
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "pl-ctrl-btn pl-play";
+    playBtn.setAttribute("aria-label", `تشغيل ${label}`);
+    playBtn.textContent = "▶";
+    playBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePreview(type, id); });
+
+    const repeatBtn = document.createElement("button");
+    repeatBtn.type = "button";
+    repeatBtn.className = "pl-ctrl-btn";
+    repeatBtn.setAttribute("aria-label", `إعادة ${label}`);
+    repeatBtn.textContent = "🔁";
+    repeatBtn.addEventListener("click", (e) => { e.stopPropagation(); replayPreview(type, id); });
+
+    const rerecordBtn = document.createElement("button");
+    rerecordBtn.type = "button";
+    rerecordBtn.className = "pl-ctrl-btn";
+    rerecordBtn.setAttribute("aria-label", `إعادة تسجيل ${label}`);
+    rerecordBtn.textContent = "✏️";
+    rerecordBtn.addEventListener("click", (e) => { e.stopPropagation(); goToItemForRerecord(type, id); });
 
     const dlBtn = document.createElement("button");
     dlBtn.type = "button";
-    dlBtn.className = "playlist-item-download";
-    dlBtn.setAttribute("aria-label", `تحميل/إرسال تسجيل ${label}`);
+    dlBtn.className = "pl-ctrl-btn";
+    dlBtn.setAttribute("aria-label", `تحميل/إرسال ${label}`);
     dlBtn.innerHTML = downloadIconSVG();
-    dlBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      downloadRecordingFor(type, id, label, surahId);
-    });
+    dlBtn.addEventListener("click", (e) => { e.stopPropagation(); downloadRecordingFor(type, id, label); });
 
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "pl-ctrl-btn pl-delete";
+    delBtn.setAttribute("aria-label", `حذف ${label}`);
+    delBtn.textContent = "🗑";
+    delBtn.addEventListener("click", (e) => { e.stopPropagation(); deletePlaylistItem(type, id, label); });
+
+    controls.append(playBtn, repeatBtn, rerecordBtn, dlBtn, delBtn);
     wrap.appendChild(row);
-    wrap.appendChild(dlBtn);
+    wrap.appendChild(controls);
     return wrap;
   }
 
-  function togglePlaylistSelection(type, id, surahId, label) {
-    const key = playlistKey(type, id, surahId);
-    const idx = state.playlistSelection.findIndex((it) => playlistKey(it.type, it.id, it.surahId) === key);
-    if (idx === -1) state.playlistSelection.push({ type, id, surahId, label });
+  function togglePlaylistSelection(type, id, label) {
+    const idx = state.playlistSelection.findIndex((it) => it.type === type && it.id === id);
+    if (idx === -1) state.playlistSelection.push({ type, id, label });
     else state.playlistSelection.splice(idx, 1);
     refreshPlaylistBadges();
     updatePlaylistFooter();
@@ -1002,8 +1212,7 @@
     el.playlistBody.querySelectorAll(".playlist-item").forEach((row) => {
       const type = row.dataset.type;
       const id = parseInt(row.dataset.id, 10);
-      const surahId = row.dataset.surahId !== undefined ? parseInt(row.dataset.surahId, 10) : undefined;
-      const order = selectionOrderOf(type, id, surahId);
+      const order = selectionOrderOf(type, id);
       const badge = row.querySelector(".playlist-item-badge");
       badge.textContent = order || "";
       badge.classList.toggle("active", !!order);
@@ -1039,7 +1248,7 @@
     el.surahRecordHint.classList.add("hidden");
     el.surahRange.classList.add("hidden");
     el.surahRangeControls.classList.add("hidden");
-    el.pageSurahList.classList.add("hidden");
+    el.hizbRange.classList.add("hidden");
     el.playlistBtn.classList.add("hidden");
     el.queueBar.classList.remove("hidden");
     await playQueueItem(0);
@@ -1060,9 +1269,13 @@
       const surah = surahByNumber(item.id);
       imagePage = surah ? surah.startPage : null;
       rec = await QuranDB.getSurahRecording(item.id);
+    } else if (item.type === "hizb") {
+      const hizb = hizbByNumber(item.id);
+      imagePage = hizb ? hizb.startPage : null;
+      rec = await QuranDB.getHizbRecording(item.id);
     } else {
       imagePage = item.id;
-      rec = await QuranDB.getPageRecording(item.surahId, item.id);
+      rec = await QuranDB.getRecording(item.id);
     }
     el.pageNumberLabel.textContent = item.label;
     if (imagePage) {
@@ -1084,180 +1297,794 @@
     }
   }
 
+  function currentLoadForMode() {
+    if (state.mode === "surah" && state.currentSurah) return loadSurah(state.currentSurah.number);
+    if (state.mode === "hizb" && state.currentHizb) return loadHizb(state.currentHizb.number);
+    return loadPage(state.currentPage);
+  }
+
   function finishQueue() {
     showToast("انتهت قائمة الاستماع");
-    const wasSurah = state.mode === "surah" && state.currentSurah;
-    const surahNum = wasSurah ? state.currentSurah.number : null;
-    const pageNum = state.currentPage;
     stopQueueIfActive();
-    if (wasSurah) loadSurah(surahNum);
-    else loadPage(pageNum);
+    currentLoadForMode();
   }
 
   function exitQueueToNormalView() {
-    const wasSurah = state.mode === "surah" && state.currentSurah;
-    const surahNum = wasSurah ? state.currentSurah.number : null;
-    const pageNum = state.currentPage;
     stopQueueIfActive();
-    if (wasSurah) loadSurah(surahNum);
-    else loadPage(pageNum);
+    currentLoadForMode();
   }
 
-  // ===== ترحيل تلقائي للتسجيلات القديمة (مرة واحدة عند أول تشغيل بعد التحديث) =====
-  // التسجيلات القديمة كانت محفوظة برقم الصفحة فقط. لكل تسجيل قديم:
-  //  - إن كانت صفحته تخص سورة واحدة فقط بلا لبس: يُنقَل تلقائيًا ويُربَط بها.
-  //  - إن كانت الصفحة تضم أكثر من سورة (كصفحة 545): يتعذّر معرفة أي سورة كان
-  //    يقصدها المستخدم، فيُنقَل التسجيل إلى قسم "تسجيلات تحتاج إلى تعيين"
-  //    ليختار المستخدم بنفسه السورة الصحيحة مرة واحدة فقط.
-  async function migrateLegacyRecordings() {
-    const legacyEntries = await QuranDB.getAllLegacyPageRecordings();
-    if (!legacyEntries.length) return { migrated: 0, pending: 0 };
-    let migrated = 0, pending = 0;
-    for (const entry of legacyEntries) {
-      const overlapping = surahsForPage(entry.page);
-      if (overlapping.length === 1) {
-        const s = overlapping[0];
-        await QuranDB.savePageRecording({
-          surahId: s.number,
-          surahName: s.name,
-          page: entry.page,
-          startPage: entry.page,
-          endPage: entry.page,
-          blob: entry.blob,
-          duration: entry.duration,
-        });
-        migrated++;
-      } else {
-        await QuranDB.savePendingRecording({
-          page: entry.page,
-          blob: entry.blob,
-          duration: entry.duration,
-          mimeType: entry.mimeType || (entry.blob && entry.blob.type) || "",
-          createdAt: entry.createdAt || Date.now(),
-          candidateSurahs: overlapping.map((s) => s.number),
-        });
-        pending++;
+  // =========================================================================
+  // ===== اختبار حفظ الأحزاب (جديد بالكامل) =====
+  // =========================================================================
+
+  function populateHizbTestSelect() {
+    populateHizbSelect(el.hizbTestSelect);
+  }
+
+  function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  // بنك أسئلة كل حزب يُحمَّل عند الحاجة فقط عبر إضافة وسم <script> ديناميكيًا —
+  // وليس عبر fetch()، لأن fetch() لملفات محلية يُمنع أو يفشل في أكثر المتصفحات
+  // إن كان التطبيق مفتوحًا مباشرة كملف (file://) بدل خادم ويب، بينما وسوم
+  // <script> تعمل في الحالتين. النتائج تُخزَّن مؤقتًا في الذاكرة بعد أول تحميل.
+  const hizbPoolCache = {};
+  const hizbPoolInFlight = {};
+  window.__onHizbPoolLoaded = function (hizbNum, data) {
+    hizbPoolCache[hizbNum] = data;
+  };
+
+  function fetchHizbPool(hizbNum) {
+    if (hizbPoolCache[hizbNum]) return Promise.resolve(hizbPoolCache[hizbNum]);
+    if (hizbPoolInFlight[hizbNum]) return hizbPoolInFlight[hizbNum];
+
+    const promise = new Promise((resolve, reject) => {
+      const src = `js/quiz-pool/hizb-${String(hizbNum).padStart(2, "0")}.js`;
+      const script = document.createElement("script");
+      script.src = src;
+      const cleanup = () => {
+        clearTimeout(timeoutHandle);
+        script.remove();
+      };
+      const timeoutHandle = setTimeout(() => {
+        cleanup();
+        reject(new Error(`تعذّر تحميل بيانات اختبار الحزب ${hizbNum} (انتهت المهلة) — تأكّد من فتح التطبيق عبر خادم أو رابط ويب وليس بالنقر المباشر على ملف index.html، ثم أعد المحاولة`));
+      }, 12000);
+      script.onload = () => {
+        cleanup();
+        if (hizbPoolCache[hizbNum]) resolve(hizbPoolCache[hizbNum]);
+        else reject(new Error(`تعذّر قراءة بيانات اختبار الحزب ${hizbNum} — أعد المحاولة`));
+      };
+      script.onerror = () => {
+        cleanup();
+        reject(new Error(`تعذّر تحميل بيانات اختبار الحزب ${hizbNum} — تأكّد من فتح التطبيق عبر خادم أو رابط ويب وليس بالنقر المباشر على ملف index.html`));
+      };
+      document.head.appendChild(script);
+    });
+    hizbPoolInFlight[hizbNum] = promise;
+    promise.finally(() => { delete hizbPoolInFlight[hizbNum]; }).catch(() => { /* المعالجة الفعلية تتم على الوعد الأصلي المُرجَع أدناه */ });
+    return promise;
+  }
+
+  // يبني مجموعة أسئلة جديدة (حتى 30) لحزب معيّن، موزّعة على بداية/وسط/نهاية
+  // صفحاته، ولا يكرر أسئلة استُخدمت من قبل إلا بعد استنفاد كل الأسئلة الممكنة.
+  async function buildAttemptQuestions(hizbNum) {
+    const pool = await fetchHizbPool(hizbNum);
+    if (!pool || pool.length === 0) return [];
+    let used = await QuranDB.getUsedQuestionIds(hizbNum);
+    let available = pool.filter((q) => !used.includes(q.qid));
+
+    const target = Math.min(QUESTIONS_PER_ATTEMPT, pool.length);
+    if (available.length < target) {
+      // استُنفدت كل الأسئلة الممكنة لهذا الحزب — أعِد التدوير من جديد
+      await QuranDB.resetUsedQuestionIds(hizbNum);
+      used = [];
+      available = pool.slice();
+    }
+
+    // وزّع الاختيار على الأثلاث الثلاثة (بداية/وسط/نهاية الصفحات)
+    const buckets = { 0: [], 1: [], 2: [] };
+    available.forEach((q) => buckets[q.third].push(q));
+    Object.values(buckets).forEach(shuffleInPlace);
+    const chosen = [];
+    const perBucket = Math.max(1, Math.floor(target / 3));
+    [0, 1, 2].forEach((b) => chosen.push(...buckets[b].slice(0, perBucket)));
+    if (chosen.length < target) {
+      const chosenIds = new Set(chosen.map((q) => q.qid));
+      const rest = shuffleInPlace(available.filter((q) => !chosenIds.has(q.qid)));
+      chosen.push(...rest.slice(0, target - chosen.length));
+    }
+    chosen.sort((a, b) => (a.page - b.page) || (a.ayah - b.ayah));
+    return chosen.slice(0, target);
+  }
+
+  async function startHizbTestAttempt() {
+    const hizbNum = parseInt(el.hizbTestSelect.value, 10);
+    const hizb = hizbByNumber(hizbNum);
+    if (!hizb) return;
+    el.hizbTestStartBtn.disabled = true;
+    const originalLabel = el.hizbTestStartBtn.textContent;
+    el.hizbTestStartBtn.textContent = "جارٍ التحميل…";
+    el.hizbTestCoverage.textContent = "جارٍ تحميل أسئلة هذا الحزب…";
+    try {
+      const questions = await buildAttemptQuestions(hizbNum);
+      if (questions.length === 0) {
+        el.hizbTestCoverage.textContent = "لا توجد أسئلة كافية لهذا الحزب";
+        return;
       }
-      await QuranDB.deleteLegacyPageRecording(entry.page);
-    }
-    return { migrated, pending };
-  }
-
-  // ===== واجهة "تسجيلات تحتاج إلى تعيين السورة" =====
-  async function refreshPendingButton() {
-    const pendingList = await QuranDB.getAllPendingRecordings();
-    const n = pendingList.length;
-    el.pendingBtn.classList.toggle("hidden", n === 0);
-    el.pendingBtnLabel.textContent = n
-      ? `تسجيلات قديمة تحتاج تعيين السورة (${n})`
-      : "تسجيلات قديمة تحتاج تعيين السورة";
-    return pendingList;
-  }
-
-  let pendingPreviewAudio = null;
-  let pendingPreviewUrl = null;
-  function stopPendingPreview() {
-    if (pendingPreviewAudio) {
-      pendingPreviewAudio.pause();
-      pendingPreviewAudio = null;
-    }
-    if (pendingPreviewUrl) {
-      URL.revokeObjectURL(pendingPreviewUrl);
-      pendingPreviewUrl = null;
+      state.hizbTest = {
+        hizb: hizbNum,
+        attemptId: "a" + Date.now(),
+        questions,
+        index: 0,
+        answers: {},
+      };
+      el.hizbTestSetup.classList.add("hidden");
+      el.hizbTestReview.classList.add("hidden");
+      el.hizbTestRun.classList.remove("hidden");
+      renderHizbTestQuestion();
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.hizbTestSetup, err);
+        return;
+      }
+      el.hizbTestCoverage.textContent = (err && err.message) || "تعذّر بدء الاختبار — حاول مجددًا";
+      showToast((err && err.message) || "تعذّر بدء الاختبار — حاول مجددًا");
+    } finally {
+      el.hizbTestStartBtn.disabled = false;
+      el.hizbTestStartBtn.textContent = originalLabel;
     }
   }
 
-  async function openPendingModal() {
-    const list = await refreshPendingButton();
-    renderPendingBody(list);
-    el.pendingModal.classList.remove("hidden");
+  function questionMetaText(q) {
+    return `صفحة ${q.page} — سورة ${q.surahName} — آية ${q.ayah}`;
   }
 
-  function renderPendingBody(list) {
-    stopPendingPreview();
-    el.pendingBody.innerHTML = "";
-    if (!list.length) {
-      const p = document.createElement("p");
-      p.className = "playlist-empty";
-      p.textContent = "لا توجد تسجيلات بحاجة لتعيين حاليًا.";
-      el.pendingBody.appendChild(p);
+  function renderHizbTestQuestion() {
+    const t = state.hizbTest;
+    const q = t.questions[t.index];
+    if (!q) { finishHizbTest(); return; }
+    el.hizbTestProgressText.textContent = `السؤال ${t.index + 1} من ${t.questions.length}`;
+    el.hizbTestProgressFill.style.width = `${((t.index) / t.questions.length) * 100}%`;
+    el.hizbTestQMeta.textContent = questionMetaText(q);
+    el.hizbTestPrefixText.textContent = q.prefix;
+    el.hizbAnswerRecordBtn.classList.remove("hidden");
+    el.hizbAnswerStopBtn.classList.add("hidden");
+    el.hizbAnswerTimer.classList.add("hidden");
+    el.hizbAnswerTimer.textContent = "0:00";
+    const hasAnswer = !!t.answers[q.qid];
+    el.hizbTestNextBtn.disabled = !hasAnswer;
+    el.hizbTestNextBtn.textContent = t.index === t.questions.length - 1 ? "إنهاء وعرض النتائج" : "السؤال التالي";
+    el.hizbAnswerRecordBtn.querySelector(".btn-text").textContent = hasAnswer ? "إعادة تسجيل الإجابة" : "ابدأ التسجيل";
+  }
+
+  async function startHizbAnswerRecording() {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      showToast("تعذّر الوصول إلى الميكروفون");
       return;
     }
-    list.sort((a, b) => a.page - b.page);
-    list.forEach((entry) => {
+    state.testStream = stream;
+    state.testChunks = [];
+    const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+    const mimeType = preferredTypes.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "";
+    try {
+      state.testMediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch (err) {
+      showToast("متصفحك لا يدعم التسجيل الصوتي");
+      return;
+    }
+    state.testMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) state.testChunks.push(e.data); };
+    state.testMediaRecorder.onstop = () => {
+      const blob = new Blob(state.testChunks, { type: state.testMediaRecorder.mimeType || "audio/webm" });
+      const duration = (Date.now() - state.testRecordStart) / 1000;
+      const t = state.hizbTest;
+      const q = t.questions[t.index];
+      if (q) t.answers[q.qid] = { blob, duration, mimeType: blob.type };
+      state.testStream && state.testStream.getTracks().forEach((tr) => tr.stop());
+      state.testStream = null;
+      renderHizbTestQuestion();
+    };
+    state.testMediaRecorder.start();
+    state.testRecordStart = Date.now();
+    el.hizbAnswerRecordBtn.classList.add("hidden");
+    el.hizbAnswerStopBtn.classList.remove("hidden");
+    el.hizbAnswerTimer.classList.remove("hidden");
+    el.hizbTestSkipBtn.disabled = true;
+    state.testRecordTimerHandle = setInterval(() => {
+      el.hizbAnswerTimer.textContent = formatTime((Date.now() - state.testRecordStart) / 1000);
+    }, 200);
+  }
+
+  function stopHizbAnswerRecording() {
+    if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
+      state.testMediaRecorder.stop();
+    }
+    clearInterval(state.testRecordTimerHandle);
+    el.hizbTestSkipBtn.disabled = false;
+  }
+
+  function goToNextHizbTestQuestion() {
+    const t = state.hizbTest;
+    if (t.index < t.questions.length - 1) {
+      t.index += 1;
+      renderHizbTestQuestion();
+    } else {
+      finishHizbTest();
+    }
+  }
+
+  function skipHizbTestQuestion() {
+    goToNextHizbTestQuestion();
+  }
+
+  async function finishHizbTest() {
+    const t = state.hizbTest;
+    const savedQids = [];
+    let qNum = 1;
+    for (const q of t.questions) {
+      const ans = t.answers[q.qid];
+      if (ans) {
+        await QuranDB.saveTestRecording({
+          hizb: t.hizb, attemptId: t.attemptId, qid: q.qid, questionNumber: qNum,
+          page: q.page, surah: q.surah, surahName: q.surahName, ayah: q.ayah, prefix: q.prefix,
+          type: q.type, fromPage: q.fromPage, toPage: q.toPage, nextSurahName: q.nextSurahName,
+          blob: ans.blob, duration: ans.duration,
+        });
+        savedQids.push(q.qid);
+      }
+      qNum++;
+    }
+    if (savedQids.length) await QuranDB.addUsedQuestionIds(t.hizb, savedQids);
+
+    el.hizbTestRun.classList.add("hidden");
+    el.hizbTestReview.classList.remove("hidden");
+    await renderHizbTestReview(t.hizb, t.attemptId);
+  }
+
+  async function renderHizbTestReview(hizbNum, attemptId) {
+    const recs = await QuranDB.getTestRecordingsForAttempt(hizbNum, attemptId);
+    el.hizbTestReviewList.innerHTML = "";
+    if (recs.length === 0) {
+      const p = document.createElement("p");
+      p.className = "playlist-empty";
+      p.textContent = "لم تُسجَّل أي إجابات في هذا الاختبار.";
+      el.hizbTestReviewList.appendChild(p);
+      return;
+    }
+    recs.forEach((r) => {
       const card = document.createElement("div");
-      card.className = "pending-item";
+      card.className = "review-item";
+      const url = URL.createObjectURL(r.blob);
+      const metaLine = r.type === "surah" ? `نقطة وصل — نهاية سورة ${r.surahName} ← بداية سورة ${r.nextSurahName}`
+        : r.type === "page" ? `نقطة وصل — نهاية صفحة ${r.fromPage} ← بداية صفحة ${r.toPage} (سورة ${r.surahName})`
+        : `صفحة ${r.page} — سورة ${r.surahName} — آية ${r.ayah}`;
+      const pageForMarks = (r.type === "page" || r.type === "surah") ? r.fromPage : r.page;
+      card.innerHTML = `
+        <div class="review-item-head">
+          <span class="review-qnum">سؤال ${r.questionNumber}</span>
+          <span class="review-meta">${metaLine}</span>
+        </div>
+        <p class="review-prefix" dir="rtl">${r.prefix}</p>
+        <audio controls src="${url}" class="review-audio"></audio>
+        <button type="button" class="review-mark-toggle-btn">📄 عرض الصفحة وتحديد الأخطاء</button>
+        <div class="review-mark-panel hidden">
+          <div class="page-status">
+            <span class="badge error-count-badge hidden">عدد الأخطاء الحالية: 0</span>
+          </div>
+          <div class="review-page-image-wrap">
+            <img class="review-page-image" src="${pageImageSrc(pageForMarks)}" alt="صورة صفحة ${pageForMarks}">
+            <div class="error-marks-layer"></div>
+          </div>
+          <div class="error-mark-controls">
+            <button type="button" class="mark-mode-btn" aria-pressed="false">
+              <span aria-hidden="true">⭕</span><span>وضع علامة خطأ</span>
+            </button>
+            <p class="mark-mode-hint hidden">الوضع مفعَّل — اضغط على أي مكان في الصورة لوضع علامة، أو اضغط على علامة موجودة لحذفها.</p>
+          </div>
+        </div>
+        <button type="button" class="pl-ctrl-btn pl-delete review-del-btn" aria-label="حذف هذا التسجيل">🗑 حذف هذا التسجيل</button>
+      `;
+      card.querySelector(".review-del-btn").addEventListener("click", async () => {
+        const ok = await showConfirm("هل تريد حذف هذا التسجيل نهائيًا؟");
+        if (!ok) return;
+        await QuranDB.deleteTestRecording(r.id);
+        URL.revokeObjectURL(url);
+        renderHizbTestReview(hizbNum, attemptId);
+      });
 
-      const head = document.createElement("div");
-      head.className = "pending-item-head";
+      // لوحة تحديد الأخطاء لهذه البطاقة تحديدًا — تُنشَأ عند أول ظهور فقط
+      // (وليس لكل الأسئلة دفعة واحدة) لتبقى شاشة المراجعة خفيفة افتراضيًا
+      const panel = card.querySelector(".review-mark-panel");
+      const toggleBtn = card.querySelector(".review-mark-toggle-btn");
+      let controller = null;
+      toggleBtn.addEventListener("click", () => {
+        const willShow = panel.classList.contains("hidden");
+        panel.classList.toggle("hidden", !willShow);
+        toggleBtn.textContent = willShow ? "📄 إخفاء الصفحة" : "📄 عرض الصفحة وتحديد الأخطاء";
+        if (willShow && !controller) {
+          controller = createMarkController({
+            wrapEl: panel.querySelector(".review-page-image-wrap"),
+            imgEl: panel.querySelector(".review-page-image"),
+            layerEl: panel.querySelector(".error-marks-layer"),
+            badgeEl: panel.querySelector(".error-count-badge"),
+            toggleBtn: panel.querySelector(".mark-mode-btn"),
+            hintEl: panel.querySelector(".mark-mode-hint"),
+            getPage: () => pageForMarks,
+          });
+          controller.load();
+        } else if (willShow && controller) {
+          controller.reposition();
+        }
+      });
 
-      const title = document.createElement("span");
-      title.className = "pending-item-title";
-      title.textContent = `الصفحة ${entry.page}`;
+      el.hizbTestReviewList.appendChild(card);
+    });
+  }
 
+  function endHizbTestEarly() {
+    const t = state.hizbTest;
+    if (Object.keys(t.answers).length === 0) {
+      showToast("لم تُسجَّل أي إجابة بعد");
+      return;
+    }
+    finishHizbTest();
+  }
+
+  function stopHizbTestRecordingIfActive() {
+    if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
+      state.testMediaRecorder.onstop = () => {
+        state.testStream && state.testStream.getTracks().forEach((t) => t.stop());
+      };
+      state.testMediaRecorder.stop();
+    }
+    clearInterval(state.testRecordTimerHandle);
+  }
+
+  function openHizbTestModal() {
+    el.hizbTestSetup.classList.remove("hidden");
+    el.hizbTestRun.classList.add("hidden");
+    el.hizbTestReview.classList.add("hidden");
+    el.hizbTestModal.classList.remove("hidden");
+    const preselect = state.currentHizb ? state.currentHizb.number
+      : (hizbForPage(state.currentPage) ? hizbForPage(state.currentPage).number : 1);
+    el.hizbTestSelect.value = String(preselect);
+    updateHizbTestCoverage();
+  }
+
+  async function updateHizbTestCoverage() {
+    const hizbNum = parseInt(el.hizbTestSelect.value, 10);
+    el.hizbTestCoverage.textContent = "جارٍ التحميل…";
+    try {
+      const pool = await fetchHizbPool(hizbNum);
+      const used = await QuranDB.getUsedQuestionIds(hizbNum);
+      const remaining = pool.filter((q) => !used.includes(q.qid)).length;
+      el.hizbTestCoverage.textContent = pool.length
+        ? `عدد الأسئلة الممكنة لهذا الحزب: ${pool.length} — المتبقي غير المستخدم حاليًا: ${remaining}`
+        : "";
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.hizbTestSetup, err);
+        return;
+      }
+      el.hizbTestCoverage.textContent = (err && err.message) || "تعذّر تحميل بيانات هذا الحزب";
+    }
+  }
+
+  // =========================================================================
+  // ===== حالة الحفظ (ثابت / يحتاج مراجعة) + تذكير المراجعة اليومي (جديد) =====
+  // =========================================================================
+
+  // يحسب حالة كل حزب من الستين اعتمادًا على تاريخ آخر نشاط حقيقي عليه
+  // (تسجيل حزب كامل، أو أي إجابة في اختبار حفظ) — بلا أي تخمين أو تقييم يدوي.
+  async function computeHizbReviewStatus() {
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const nums = Array.from({ length: 60 }, (_, i) => i + 1);
+    const entries = await Promise.all(nums.map(async (h) => {
+      let lastTs = null;
+      const [rec, tests] = await Promise.all([
+        QuranDB.getHizbRecording(h).catch(() => null),
+        QuranDB.getAllTestRecordingsForHizb(h).catch(() => []),
+      ]);
+      if (rec && rec.createdAt) lastTs = rec.createdAt;
+      tests.forEach((t) => { if (t.createdAt && (!lastTs || t.createdAt > lastTs)) lastTs = t.createdAt; });
+      if (lastTs == null) return [h, { level: "none", lastTs: null, daysSince: null }];
+      const daysSince = Math.floor((now - lastTs) / DAY);
+      const level = daysSince <= 14 ? "solid" : daysSince <= 30 ? "soon" : "needs";
+      return [h, { level, lastTs, daysSince }];
+    }));
+    return Object.fromEntries(entries);
+  }
+
+  const STATUS_LABELS = { solid: "ثابت", soon: "يحتاج مراجعة قريبًا", needs: "يحتاج مراجعة", none: "لم يُسجَّل بعد" };
+
+  function renderStatusDashboard(statusMap) {
+    const counts = { solid: 0, soon: 0, needs: 0, none: 0 };
+    for (let h = 1; h <= 60; h++) counts[statusMap[h].level]++;
+    el.statusSummaryRow.innerHTML = "";
+    ["solid", "soon", "needs", "none"].forEach((level) => {
+      const chip = document.createElement("span");
+      chip.className = `status-chip c-${level}`;
+      chip.textContent = `${counts[level]} ${STATUS_LABELS[level]}`;
+      el.statusSummaryRow.appendChild(chip);
+    });
+
+    el.statusGrid.innerHTML = "";
+    for (let h = 1; h <= 60; h++) {
+      const s = statusMap[h];
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = `status-cell c-${s.level}`;
+      cell.textContent = String(h);
+      cell.title = s.level === "none" ? "لم يُسجَّل بعد" : `${STATUS_LABELS[s.level]} — آخر نشاط قبل ${s.daysSince} يوم`;
+      cell.addEventListener("click", () => {
+        el.reminderModal.classList.add("hidden");
+        setModeUI("hizb");
+        loadHizb(h);
+      });
+      el.statusGrid.appendChild(cell);
+    }
+  }
+
+  async function openReminderModal() {
+    el.reminderModal.classList.remove("hidden");
+    el.statusSummaryRow.innerHTML = '<span class="status-chip">جارٍ التحميل…</span>';
+    el.statusGrid.innerHTML = "";
+    try {
+      const statusMap = await computeHizbReviewStatus();
+      renderStatusDashboard(statusMap);
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.reminderBody, err);
+        return;
+      }
+      el.statusSummaryRow.innerHTML = '<span class="status-chip">تعذّر تحميل حالة الحفظ</span>';
+    }
+  }
+
+  // ميزة التذكير اليومي بالإشعارات أُلغيت. هذا التنظيف لمرة واحدة يمسح أي حالة
+  // تذكير كانت محفوظة من نسخة سابقة من التطبيق (تفعيل/وقت/آخر إطلاق) حتى لا
+  // يبقى أي إشعار معلَّق لمن كان قد فعّلها سابقًا.
+  function clearLegacyReminderState() {
+    try {
+      localStorage.removeItem("quran-reminder-enabled");
+      localStorage.removeItem("quran-reminder-time");
+      localStorage.removeItem("quran-reminder-last-fired");
+    } catch (e) { /* تجاهل */ }
+  }
+  clearLegacyReminderState();
+
+  // =========================================================================
+  // ===== سجل التقدّم الصوتي: أرشيف كل نسخ التسجيل + كشف "أطول من المعتاد" =====
+  // =========================================================================
+
+  function targetLabel(type, id) {
+    if (type === "surah") { const s = surahByNumber(id); return s ? `سورة ${s.name}` : `سورة ${id}`; }
+    if (type === "hizb") { const h = hizbByNumber(id); return h ? h.name : `الحزب ${id}`; }
+    return `الصفحة ${id}`;
+  }
+
+  // مقارنة بسيطة بلا أي ذكاء اصطناعي: هل هذا التسجيل أطول بشكل ملحوظ من
+  // متوسط النسخ السابقة لنفس الهدف؟ فرق نسبي كبير غالبًا يكشف تلعثمًا أو تكرارًا.
+  function computeDurationAnomaly(priorHistory, latestDuration) {
+    const durations = (priorHistory || []).map((h) => h.duration).filter((d) => d > 0);
+    if (durations.length < 2) return { isAnomaly: false, avgDuration: null };
+    const avg = durations.reduce((a, b) => a + b, 0) / durations.length;
+    const diff = latestDuration - avg;
+    const isAnomaly = avg > 0 && diff / avg > 0.35 && diff > 20;
+    return { isAnomaly, avgDuration: avg };
+  }
+
+  function stopHistoryPreview() {
+    state.historyPreview.audio.pause();
+    state.historyPreview.audio.currentTime = 0;
+    if (state.historyPreview.url) { URL.revokeObjectURL(state.historyPreview.url); state.historyPreview.url = null; }
+    const prevBtn = state.historyPreview.btn;
+    state.historyPreview.entryId = null;
+    state.historyPreview.btn = null;
+    if (prevBtn) prevBtn.textContent = "▶";
+  }
+
+  function toggleHistoryPreview(entry, btnEl) {
+    const isSame = state.historyPreview.entryId === entry.id;
+    if (isSame && !state.historyPreview.audio.paused) {
+      state.historyPreview.audio.pause();
+      btnEl.textContent = "▶";
+      return;
+    }
+    if (isSame && state.historyPreview.audio.paused && state.historyPreview.audio.src) {
+      state.historyPreview.audio.play();
+      btnEl.textContent = "⏸";
+      return;
+    }
+    stopHistoryPreview();
+    const url = URL.createObjectURL(entry.blob);
+    state.historyPreview.entryId = entry.id;
+    state.historyPreview.btn = btnEl;
+    state.historyPreview.url = url;
+    state.historyPreview.audio.src = url;
+    state.historyPreview.audio.currentTime = 0;
+    state.historyPreview.audio.play();
+    btnEl.textContent = "⏸";
+  }
+  state.historyPreview.audio.addEventListener("ended", () => {
+    if (state.historyPreview.btn) state.historyPreview.btn.textContent = "▶";
+    state.historyPreview.entryId = null;
+    state.historyPreview.btn = null;
+  });
+
+  // يشغّل أقدم نسخة كاملة، ثم أحدث نسخة تلقائيًا بعدها مباشرة — لتسمع الفرق بأذنك
+  function compareOldestNewest(history) {
+    if (!history || history.length < 2) return;
+    stopHistoryPreview();
+    const oldest = history[0];
+    const newest = history[history.length - 1];
+    showToast("▶ يشغّل الأقدم أولاً، ثم الأحدث تلقائيًا بعده");
+    const urlOld = URL.createObjectURL(oldest.blob);
+    state.historyPreview.url = urlOld;
+    state.historyPreview.audio.src = urlOld;
+    state.historyPreview.audio.currentTime = 0;
+    state.historyPreview.audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(urlOld);
+      const urlNew = URL.createObjectURL(newest.blob);
+      state.historyPreview.url = urlNew;
+      state.historyPreview.audio.src = urlNew;
+      state.historyPreview.audio.currentTime = 0;
+      state.historyPreview.audio.play();
+    }, { once: true });
+    state.historyPreview.audio.play();
+  }
+
+  function renderProgressLog(history, type, id) {
+    stopHistoryPreview();
+    el.progressLogList.innerHTML = "";
+    if (history.length === 0) {
+      el.progressLogCompareRow.classList.add("hidden");
+      el.progressLogList.innerHTML = '<p class="playlist-empty">لا يوجد سجل بعد — كل تسجيل تحفظه من الآن يُضاف هنا تلقائيًا، دون حذف القديم.</p>';
+      return;
+    }
+    el.progressLogCompareRow.classList.toggle("hidden", history.length < 2);
+    const durations = history.map((h) => h.duration).filter((d) => d > 0);
+    const avg = durations.length >= 2 ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
+
+    history.slice().reverse().forEach((entry, idxFromEnd) => {
+      const originalIndex = history.length - 1 - idxFromEnd;
+      const isLatest = originalIndex === history.length - 1;
+      const isAnomalous = avg != null && (entry.duration - avg) / avg > 0.35 && (entry.duration - avg) > 20;
+      const dateStr = formatArabicDate(entry.createdAt);
+
+      const row = document.createElement("div");
+      row.className = "progress-log-item";
+      const info = document.createElement("div");
+      info.className = "progress-log-item-info";
+      info.innerHTML =
+        `<span class="progress-log-num">#${originalIndex + 1}${isLatest ? " (الأحدث)" : ""}</span>` +
+        `<span class="progress-log-date">${dateStr}</span>` +
+        `<span class="progress-log-duration">${formatTime(entry.duration)}</span>` +
+        (isAnomalous ? `<span class="progress-log-flag">⚠️ أطول من المعتاد</span>` : "");
+
+      const controls = document.createElement("div");
+      controls.className = "progress-log-item-controls";
       const playBtn = document.createElement("button");
       playBtn.type = "button";
-      playBtn.className = "playlist-item-download";
-      playBtn.setAttribute("aria-label", `تشغيل تسجيل الصفحة ${entry.page}`);
-      playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>`;
-      playBtn.addEventListener("click", () => {
-        stopPendingPreview();
-        pendingPreviewUrl = URL.createObjectURL(entry.blob);
-        pendingPreviewAudio = new Audio(pendingPreviewUrl);
-        pendingPreviewAudio.play();
+      playBtn.className = "pl-ctrl-btn pl-play";
+      playBtn.setAttribute("aria-label", `تشغيل النسخة رقم ${originalIndex + 1}`);
+      playBtn.textContent = "▶";
+      playBtn.addEventListener("click", () => toggleHistoryPreview(entry, playBtn));
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "pl-ctrl-btn pl-delete";
+      delBtn.setAttribute("aria-label", `حذف النسخة رقم ${originalIndex + 1}`);
+      delBtn.textContent = "🗑";
+      delBtn.addEventListener("click", async () => {
+        const ok = await showConfirm("حذف هذه النسخة من السجل نهائيًا؟ (هذا لا يحذف تسجيلك الحالي الفعّال)");
+        if (!ok) return;
+        stopHistoryPreview();
+        await QuranDB.deleteHistoryEntry(entry.id);
+        const fresh = await QuranDB.getHistoryForTarget(type, id);
+        renderProgressLog(fresh, type, id);
       });
+      controls.append(playBtn, delBtn);
 
-      const discardBtn = document.createElement("button");
-      discardBtn.type = "button";
-      discardBtn.className = "playlist-item-download";
-      discardBtn.setAttribute("aria-label", `حذف تسجيل الصفحة ${entry.page} نهائيًا`);
-      discardBtn.textContent = "🗑";
-      discardBtn.addEventListener("click", async () => {
-        if (!confirm(`حذف تسجيل الصفحة ${entry.page} نهائيًا دون تعيينه لأي سورة؟`)) return;
-        stopPendingPreview();
-        await QuranDB.deletePendingRecording(entry.page);
-        const updated = await refreshPendingButton();
-        renderPendingBody(updated);
-      });
-
-      head.appendChild(title);
-      head.appendChild(playBtn);
-      head.appendChild(discardBtn);
-
-      const chipsRow = document.createElement("div");
-      chipsRow.className = "quiz-chips pending-item-chips";
-      (entry.candidateSurahs || []).forEach((surahNum) => {
-        const s = surahByNumber(surahNum);
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "chip pending-assign-chip";
-        chip.textContent = s ? `${s.number}. ${s.name}` : String(surahNum);
-        chip.addEventListener("click", async () => {
-          stopPendingPreview();
-          await QuranDB.savePageRecording({
-            surahId: surahNum,
-            surahName: s ? s.name : null,
-            page: entry.page,
-            startPage: entry.page,
-            endPage: entry.page,
-            blob: entry.blob,
-            duration: entry.duration,
-          });
-          await QuranDB.deletePendingRecording(entry.page);
-          showToast(`تم تعيين تسجيل الصفحة ${entry.page} لسورة ${s ? s.name : surahNum}`);
-          const updated = await refreshPendingButton();
-          renderPendingBody(updated);
-          if (state.mode === "page" && state.currentPage === entry.page) {
-            loadPage(state.currentPage);
-          }
-        });
-        chipsRow.appendChild(chip);
-      });
-
-      card.appendChild(head);
-      card.appendChild(chipsRow);
-      el.pendingBody.appendChild(card);
+      row.append(info, controls);
+      el.progressLogList.appendChild(row);
     });
+  }
+
+  async function openProgressLogModal() {
+    const { type, id } = state.recordTarget;
+    el.progressLogTargetLabel.textContent = `سجل تسجيلات: ${targetLabel(type, id)}`;
+    el.progressLogModal.classList.remove("hidden");
+    el.progressLogList.innerHTML = '<p class="playlist-empty">جارٍ التحميل…</p>';
+    el.progressLogCompareRow.classList.add("hidden");
+    try {
+      const history = await QuranDB.getHistoryForTarget(type, id);
+      renderProgressLog(history, type, id);
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.progressLogBody, err);
+        return;
+      }
+      el.progressLogList.innerHTML = '<p class="playlist-empty">تعذّر تحميل سجل التقدّم</p>';
+    }
+  }
+
+  // =========================================================================
+  // ===== علامات مواضع الأخطاء على صورة الصفحة (جديد) =====
+  // =========================================================================
+
+  // يحسب موضع البكسل لعلامة (نسبةً لصورة الصفحة الفعلية المعروضة، لا لإطارها،
+  // حتى تبقى صحيحة رغم اختلاف أبعاد الصورة عن أبعاد الإطار المحيط بها)
+  function computeMarkPixelPositionIn(wrapEl, imgEl, xPercent, yPercent) {
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const imgRect = imgEl.getBoundingClientRect();
+    const offsetX = imgRect.left - wrapRect.left;
+    const offsetY = imgRect.top - wrapRect.top;
+    return {
+      left: offsetX + (xPercent / 100) * imgRect.width,
+      top: offsetY + (yPercent / 100) * imgRect.height,
+    };
+  }
+
+  // "متحكّم علامات" مستقل قابل لإنشاء أكثر من نسخة منه في آن واحد — نسخة واحدة
+  // لعرض الصفحة الرئيسي، ونسخة مستقلة لكل بطاقة في شاشة مراجعة اختبار الحفظ،
+  // كلها تقرأ/تكتب من نفس مخزن "errorMarks" بحسب رقم الصفحة.
+  function createMarkController({ wrapEl, imgEl, layerEl, badgeEl, toggleBtn, hintEl, getPage }) {
+    let marks = [];
+    let active = false;
+
+    function makeDot(mark) {
+      const dot = document.createElement("div");
+      dot.className = "error-mark";
+      dot.dataset.markId = mark.id;
+      dot.setAttribute("role", "button");
+      dot.setAttribute("aria-label", "حذف علامة الخطأ هذه");
+      dot.textContent = "×";
+      const pos = computeMarkPixelPositionIn(wrapEl, imgEl, mark.xPercent, mark.yPercent);
+      dot.style.left = pos.left + "px";
+      dot.style.top = pos.top + "px";
+      const onDelete = (e) => { e.stopPropagation(); removeMark(mark.id); };
+      dot.addEventListener("click", onDelete);
+      let pressTimer = null;
+      const startPress = (e) => { pressTimer = setTimeout(() => onDelete(e), 550); };
+      const cancelPress = () => clearTimeout(pressTimer);
+      dot.addEventListener("touchstart", startPress, { passive: true });
+      dot.addEventListener("touchend", cancelPress);
+      dot.addEventListener("touchmove", cancelPress);
+      dot.addEventListener("mousedown", startPress);
+      dot.addEventListener("mouseup", cancelPress);
+      dot.addEventListener("mouseleave", cancelPress);
+      return dot;
+    }
+
+    function render() {
+      layerEl.innerHTML = "";
+      marks.forEach((m) => layerEl.appendChild(makeDot(m)));
+      updateBadge();
+    }
+
+    function reposition() {
+      if (!marks.length) return;
+      layerEl.querySelectorAll(".error-mark").forEach((dot) => {
+        const m = marks.find((x) => String(x.id) === dot.dataset.markId);
+        if (!m) return;
+        const pos = computeMarkPixelPositionIn(wrapEl, imgEl, m.xPercent, m.yPercent);
+        dot.style.left = pos.left + "px";
+        dot.style.top = pos.top + "px";
+      });
+    }
+
+    function updateBadge() {
+      if (!badgeEl) return;
+      const n = marks.length;
+      badgeEl.textContent = `عدد الأخطاء الحالية: ${n}`;
+      badgeEl.classList.toggle("hidden", n === 0 && !active);
+    }
+
+    async function persist() {
+      try { await QuranDB.saveErrorMarks(getPage(), marks); }
+      catch (e) { showToast("تعذّر حفظ علامات هذه الصفحة"); }
+    }
+
+    async function load() {
+      try { marks = await QuranDB.getErrorMarks(getPage()); }
+      catch (e) { marks = []; }
+      render();
+    }
+
+    function addAtClientXY(clientX, clientY) {
+      const imgRect = imgEl.getBoundingClientRect();
+      if (imgRect.width === 0 || imgRect.height === 0) return;
+      let xPercent = ((clientX - imgRect.left) / imgRect.width) * 100;
+      let yPercent = ((clientY - imgRect.top) / imgRect.height) * 100;
+      if (xPercent < 0 || xPercent > 100 || yPercent < 0 || yPercent > 100) return;
+      xPercent = Math.max(0, Math.min(100, xPercent));
+      yPercent = Math.max(0, Math.min(100, yPercent));
+      marks.push({ id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, xPercent, yPercent, createdAt: Date.now() });
+      render();
+      persist();
+    }
+
+    function removeMark(markId) {
+      marks = marks.filter((m) => String(m.id) !== String(markId));
+      render();
+      persist();
+    }
+
+    function setActive(next) {
+      active = next;
+      if (toggleBtn) toggleBtn.setAttribute("aria-pressed", active ? "true" : "false");
+      if (hintEl) hintEl.classList.toggle("hidden", !active);
+      wrapEl.classList.toggle("mark-mode-active", active);
+      updateBadge();
+    }
+
+    wrapEl.addEventListener("click", (e) => {
+      if (!active) return;
+      if (imgEl.classList.contains("hidden")) return;
+      addAtClientXY(e.clientX, e.clientY);
+    });
+    if (toggleBtn) toggleBtn.addEventListener("click", () => setActive(!active));
+
+    let resizeTimer = null;
+    window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(reposition, 120); });
+
+    return { load, render, reposition, setActive, isActive: () => active };
+  }
+
+  // المتحكّم الرئيسي لصورة الصفحة المعروضة في الشاشة الأساسية
+  const mainMarkController = createMarkController({
+    wrapEl: el.pageImageWrap, imgEl: el.pageImage, layerEl: el.errorMarksLayer,
+    badgeEl: el.errorCountBadge, toggleBtn: el.markErrorModeBtn, hintEl: el.markModeHint,
+    getPage: () => state.currentPage,
+  });
+
+  async function loadErrorMarksForPage(pageNum) {
+    if (state.currentPage !== pageNum) return;
+    await mainMarkController.load();
+  }
+
+  async function openErrorStatsModal() {
+    el.errorStatsModal.classList.remove("hidden");
+    el.errorStatsList.innerHTML = '<p class="playlist-empty">جارٍ التحميل…</p>';
+    try {
+      const rows = await QuranDB.getAllErrorMarkPages();
+      if (rows.length === 0) {
+        el.errorStatsList.innerHTML = '<p class="playlist-empty">لم تضع أي علامة خطأ بعد. افتح أي صفحة واضغط "وضع علامة خطأ" للبدء.</p>';
+        return;
+      }
+      el.errorStatsList.innerHTML = "";
+      rows.forEach((r) => {
+        const n = (r.marks || []).length;
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "error-stats-row";
+        row.innerHTML =
+          `<span class="error-stats-page">صفحة ${r.page}</span>` +
+          `<span class="error-stats-count ${n === 0 ? "zero" : "nonzero"}">${n === 0 ? "0" : `${n} ${n === 1 ? "خطأ" : "أخطاء"}`}</span>`;
+        row.addEventListener("click", () => {
+          el.errorStatsModal.classList.add("hidden");
+          setModeUI("page");
+          loadPage(r.page);
+        });
+        el.errorStatsList.appendChild(row);
+      });
+    } catch (err) {
+      if (isStructuralDbError(err)) {
+        renderDbRecoveryAction(el.errorStatsBody, err);
+        return;
+      }
+      el.errorStatsList.innerHTML = '<p class="playlist-empty">تعذّر تحميل الإحصائيات</p>';
+    }
   }
 
   // ===== ربط الأحداث: التبديل بين الأوضاع =====
@@ -1278,15 +2105,29 @@
     }
     if (state.mode === "surah") return;
     setModeUI("surah");
-    const n = state.currentSurah
-      ? state.currentSurah.number
-      : (state.recordTarget && state.recordTarget.surahId) || surahForPage(state.currentPage).number;
+    const n = state.currentSurah ? state.currentSurah.number : surahForPage(state.currentPage).number;
     loadSurah(n);
+  });
+
+  el.modeHizbBtn.addEventListener("click", () => {
+    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+      showToast("أوقف التسجيل الحالي أولًا");
+      return;
+    }
+    if (state.mode === "hizb") return;
+    setModeUI("hizb");
+    const n = state.currentHizb ? state.currentHizb.number : hizbForPage(state.currentPage).number;
+    loadHizb(n);
   });
 
   el.surahSelect.addEventListener("change", () => {
     const n = parseInt(el.surahSelect.value, 10);
     if (!isNaN(n)) loadSurah(n);
+  });
+
+  el.hizbSelect.addEventListener("change", () => {
+    const n = parseInt(el.hizbSelect.value, 10);
+    if (!isNaN(n)) loadHizb(n);
   });
 
   el.surahExtendBtn.addEventListener("click", () => adjustSurahEndPage(1));
@@ -1300,9 +2141,6 @@
 
   el.stopBtn.addEventListener("click", () => {
     stopPlayback();
-    if (state.queue) {
-      // إعادة السماح بالتشغيل اليدوي للمقطع الحالي بدل قفزه تلقائيًا
-    }
   });
 
   el.seekBar.addEventListener("input", () => {
@@ -1313,60 +2151,44 @@
   el.stopRecordBtn.addEventListener("click", stopRecording);
 
   el.deleteBtn.addEventListener("click", async () => {
-    const isSurah = state.recordTarget.type === "surah";
-    let label;
-    if (isSurah) {
-      label = state.currentSurah ? `سورة ${state.currentSurah.name}` : `سورة رقم ${state.recordTarget.id}`;
-    } else {
-      const s = surahByNumber(state.recordTarget.surahId);
-      label = s ? `صفحة ${state.recordTarget.id} (سورة ${s.name})` : `صفحة ${state.recordTarget.id}`;
-    }
-    if (!confirm(`هل تريد حذف تسجيل ${label} نهائيًا؟`)) return;
-    if (isSurah) {
-      await QuranDB.deleteSurahRecording(state.recordTarget.id);
-      showToast("تم حذف تسجيل السورة");
-      loadSurah(state.recordTarget.id);
-    } else {
-      await QuranDB.deletePageRecording(state.recordTarget.surahId, state.recordTarget.id);
-      showToast("تم حذف التسجيل");
-      await renderPageSurahList(state.currentPage, state.pageSurahs, state.recordTarget.surahId);
-      await setAudioFromRecord(null);
-    }
+    const type = state.recordTarget.type;
+    const label = type === "surah" && state.currentSurah ? `سورة ${state.currentSurah.name}`
+      : type === "hizb" && state.currentHizb ? state.currentHizb.name
+      : `صفحة ${state.currentPage}`;
+    const ok = await showConfirm(`هل تريد حذف تسجيل ${label} نهائيًا؟`);
+    if (!ok) return;
+    await deleteRecordByType(type, state.recordTarget.id);
+    showToast("تم حذف التسجيل");
+    if (type === "surah") loadSurah(state.recordTarget.id);
+    else if (type === "hizb") loadHizb(state.recordTarget.id);
+    else loadPage(state.recordTarget.id);
   });
 
   el.downloadBtn.addEventListener("click", async () => {
-    if (!state.hasRecording || !state.currentObjectUrl) return;
+    if (!state.hasRecording) return;
     const type = state.recordTarget.type;
     const id = state.recordTarget.id;
-    const surahId = state.recordTarget.surahId;
-    let label, rec;
-    if (type === "surah") {
-      label = state.currentSurah ? `سورة ${state.currentSurah.name}` : `سورة ${id}`;
-      rec = await QuranDB.getSurahRecording(id);
-    } else {
-      const s = surahByNumber(surahId);
-      label = s ? `سورة ${s.name} — صفحة ${id}` : `صفحة ${id}`;
-      rec = await QuranDB.getPageRecording(surahId, id);
-    }
-    // نجلب التسجيل من قاعدة البيانات مباشرةً (بدل الاعتماد على رابط التشغيل الحالي فقط)
-    // لضمان الحصول على كائن Blob صالح للمشاركة عبر واتساب أو غيره.
+    const label = type === "surah" && state.currentSurah ? `سورة ${state.currentSurah.name}`
+      : type === "hizb" && state.currentHizb ? state.currentHizb.name
+      : `صفحة ${id}`;
+    const rec = await getRecordByType(type, id);
     if (!rec || !rec.blob) {
       showToast("لا يوجد تسجيل لتحميله");
       return;
     }
-    const filename = buildRecordingFileName(type, id, state.currentRecMime, surahId);
+    const filename = buildRecordingFileName(type, id, rec.mimeType || rec.blob.type);
     await shareOrDownloadBlob(rec.blob, filename, label);
   });
 
   // ===== ربط الأحداث: التنقل بين الصفحات =====
   el.prevPage.addEventListener("click", () => {
-    // زر اليمين = الصفحة السابقة (الرقم الأصغر)
     if (state.mode === "surah") flipSurahPage(-1);
+    else if (state.mode === "hizb") flipHizbPage(-1);
     else loadPage(state.currentPage - 1);
   });
   el.nextPage.addEventListener("click", () => {
-    // زر اليسار = الصفحة التالية (الرقم الأكبر)
     if (state.mode === "surah") flipSurahPage(1);
+    else if (state.mode === "hizb") flipHizbPage(1);
     else loadPage(state.currentPage + 1);
   });
 
@@ -1398,6 +2220,7 @@
 
   el.pageImageWrap.addEventListener("click", () => {
     if (el.pageImage.classList.contains("hidden")) return;
+    if (mainMarkController.isActive()) return; // المتحكّم يتولى النقر بنفسه في هذه الحالة
     el.lightboxImg.src = el.pageImage.src;
     el.lightbox.classList.remove("hidden");
   });
@@ -1409,11 +2232,19 @@
     el.lightboxImg.removeAttribute("src");
   });
 
+  // ===== ربط الأحداث: علامات مواضع الأخطاء =====
+  // (تفعيل/تعطيل وضع العلامة على الشاشة الرئيسية مربوط داخليًا عبر mainMarkController)
+  el.errorStatsBtn.addEventListener("click", openErrorStatsModal);
+  el.closeErrorStatsModal.addEventListener("click", () => el.errorStatsModal.classList.add("hidden"));
+  el.errorStatsModal.addEventListener("click", (e) => {
+    if (e.target === el.errorStatsModal) el.errorStatsModal.classList.add("hidden");
+  });
+
   // ===== ربط الأحداث: قائمة الاستماع =====
   el.playlistBtn.addEventListener("click", openPlaylistModal);
-  el.closePlaylistModal.addEventListener("click", () => el.playlistModal.classList.add("hidden"));
+  el.closePlaylistModal.addEventListener("click", () => { stopPreview(); el.playlistModal.classList.add("hidden"); });
   el.playlistModal.addEventListener("click", (e) => {
-    if (e.target === el.playlistModal) el.playlistModal.classList.add("hidden");
+    if (e.target === el.playlistModal) { stopPreview(); el.playlistModal.classList.add("hidden"); }
   });
   el.clearPlaylistBtn.addEventListener("click", () => {
     state.playlistSelection = [];
@@ -1423,6 +2254,7 @@
   el.startPlaylistBtn.addEventListener("click", () => {
     if (state.playlistSelection.length === 0) return;
     const items = state.playlistSelection.slice();
+    stopPreview();
     el.playlistModal.classList.add("hidden");
     startQueue(items);
   });
@@ -1430,19 +2262,6 @@
   el.queuePrevBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index - 1); });
   el.queueNextBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index + 1); });
   el.queueStopBtn.addEventListener("click", exitQueueToNormalView);
-
-  // ===== ربط الأحداث: تسجيلات تحتاج إلى تعيين =====
-  el.pendingBtn.addEventListener("click", openPendingModal);
-  el.closePendingModal.addEventListener("click", () => {
-    stopPendingPreview();
-    el.pendingModal.classList.add("hidden");
-  });
-  el.pendingModal.addEventListener("click", (e) => {
-    if (e.target === el.pendingModal) {
-      stopPendingPreview();
-      el.pendingModal.classList.add("hidden");
-    }
-  });
 
   // ===== ربط الأحداث: اختبار ترتيب السور =====
   el.quizBtn.addEventListener("click", () => {
@@ -1454,12 +2273,71 @@
     if (e.target === el.quizModal) el.quizModal.classList.add("hidden");
   });
   el.quizStartBtn.addEventListener("click", startQuiz);
+  el.quizJuzSelect.addEventListener("change", startQuiz);
   el.quizResetBtn.addEventListener("click", startQuiz);
   el.quizCheckBtn.addEventListener("click", checkQuiz);
 
+  // ===== ربط الأحداث: اختبار حفظ الأحزاب =====
+  el.hizbTestBtn.addEventListener("click", openHizbTestModal);
+  el.closeHizbTestModal.addEventListener("click", () => {
+    stopHizbTestRecordingIfActive();
+    el.hizbTestModal.classList.add("hidden");
+  });
+  el.hizbTestModal.addEventListener("click", (e) => {
+    if (e.target === el.hizbTestModal) {
+      stopHizbTestRecordingIfActive();
+      el.hizbTestModal.classList.add("hidden");
+    }
+  });
+  el.hizbTestSelect.addEventListener("change", updateHizbTestCoverage);
+  el.hizbTestStartBtn.addEventListener("click", startHizbTestAttempt);
+  el.hizbAnswerRecordBtn.addEventListener("click", startHizbAnswerRecording);
+  el.hizbAnswerStopBtn.addEventListener("click", stopHizbAnswerRecording);
+  el.hizbTestNextBtn.addEventListener("click", goToNextHizbTestQuestion);
+  el.hizbTestSkipBtn.addEventListener("click", skipHizbTestQuestion);
+  el.hizbTestViewPageBtn.addEventListener("click", () => {
+    const t = state.hizbTest;
+    const q = t.questions[t.index];
+    if (!q) return;
+    const pageNum = q.type === "page" || q.type === "surah" ? q.fromPage : q.page;
+    el.lightboxImg.src = pageImageSrc(pageNum);
+    el.lightbox.classList.remove("hidden");
+  });
+  el.hizbTestEndEarlyBtn.addEventListener("click", endHizbTestEarly);
+  el.hizbTestNewAttemptBtn.addEventListener("click", () => {
+    el.hizbTestReview.classList.add("hidden");
+    el.hizbTestSetup.classList.remove("hidden");
+    updateHizbTestCoverage();
+  });
+
+  // ===== ربط الأحداث: حالة الحفظ =====
+  el.reminderBtn.addEventListener("click", openReminderModal);
+  el.closeReminderModal.addEventListener("click", () => el.reminderModal.classList.add("hidden"));
+  el.reminderModal.addEventListener("click", (e) => {
+    if (e.target === el.reminderModal) el.reminderModal.classList.add("hidden");
+  });
+
+  // ===== ربط الأحداث: سجل التقدّم الصوتي =====
+  el.progressLogBtn.addEventListener("click", openProgressLogModal);
+  el.closeProgressLogModal.addEventListener("click", () => { stopHistoryPreview(); el.progressLogModal.classList.add("hidden"); });
+  el.progressLogModal.addEventListener("click", (e) => {
+    if (e.target === el.progressLogModal) { stopHistoryPreview(); el.progressLogModal.classList.add("hidden"); }
+  });
+  el.compareOldestNewestBtn.addEventListener("click", async () => {
+    const { type, id } = state.recordTarget;
+    try {
+      const history = await QuranDB.getHistoryForTarget(type, id);
+      compareOldestNewest(history);
+    } catch (e) {
+      showToast("تعذّر تشغيل المقارنة");
+    }
+  });
+
   // منع فقدان تسجيل جارٍ عند إغلاق الصفحة
   window.addEventListener("beforeunload", (e) => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    const recording = (state.mediaRecorder && state.mediaRecorder.state === "recording") ||
+      (state.testMediaRecorder && state.testMediaRecorder.state === "recording");
+    if (recording) {
       e.preventDefault();
       e.returnValue = "";
     }
@@ -1472,27 +2350,41 @@
         /* يعمل التطبيق محليًا حتى لو فشل تسجيل الـ Service Worker */
       });
     });
+    // عند نشر تحديث جديد للتطبيق، يتولى الإصدار الجديد التحكم تلقائيًا —
+    // نعيد تحميل الصفحة مرّة واحدة فقط لضمان وصول كل الإصلاحات فورًا
+    // بدل بقاء نسخة قديمة مخزَّنة تعمل بصمت حتى تحديث يدوي لاحق.
+    let reloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadedForUpdate) return;
+      reloadedForUpdate = true;
+      window.location.reload();
+    });
   }
+
+  // ===== تنبيه فتح التطبيق كملف مباشر (file://) =====
+  // معظم مشاكل قائمة الاستماع واختبار حفظ الأحزاب التي قد تظهر سببها هذا تحديدًا
+  const FILE_WARNING_DISMISSED_KEY = "quran-file-warning-dismissed";
+  if (window.location.protocol === "file:") {
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(FILE_WARNING_DISMISSED_KEY) === "1"; } catch (e) { /* تجاهل */ }
+    if (!dismissed) el.fileProtocolWarning.classList.remove("hidden");
+  }
+  el.dismissFileWarning.addEventListener("click", () => {
+    el.fileProtocolWarning.classList.add("hidden");
+    try { localStorage.setItem(FILE_WARNING_DISMISSED_KEY, "1"); } catch (e) { /* تجاهل */ }
+  });
 
   // ===== البدء =====
   loadSurahOverrides();
   populateSurahSelect();
+  populateHizbSelect(el.hizbSelect);
+  populateHizbTestSelect();
   populateQuizJuzSelect();
-
-  // ترحيل تلقائي للتسجيلات القديمة (مرة واحدة فقط — لا يفعل شيئًا في المرات التالية)
-  const migrationResult = await migrateLegacyRecordings();
-  await refreshPendingButton();
-  if (migrationResult.migrated || migrationResult.pending) {
-    const parts = [];
-    if (migrationResult.migrated) parts.push(`تم نقل ${migrationResult.migrated} تسجيل صفحة تلقائيًا للنظام الجديد`);
-    if (migrationResult.pending) parts.push(`${migrationResult.pending} تسجيل بحاجة لاختيار السورة يدويًا`);
-    showToast(parts.join(" — "));
-  }
 
   let startMode = "page";
   try {
     const m = localStorage.getItem("quran-last-mode");
-    if (m === "surah") startMode = "surah";
+    if (m === "surah" || m === "hizb") startMode = m;
   } catch (e) { /* تجاهل */ }
   setModeUI(startMode);
 
@@ -1503,6 +2395,13 @@
       if (!isNaN(s) && s >= 1 && s <= 114) startSurah = s;
     } catch (e) { /* تجاهل */ }
     loadSurah(startSurah);
+  } else if (startMode === "hizb") {
+    let startHizb = 1;
+    try {
+      const h = parseInt(localStorage.getItem("quran-last-hizb"), 10);
+      if (!isNaN(h) && h >= 1 && h <= 60) startHizb = h;
+    } catch (e) { /* تجاهل */ }
+    loadHizb(startHizb);
   } else {
     let startPage = 1;
     try {

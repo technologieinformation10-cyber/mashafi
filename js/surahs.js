@@ -1,15 +1,10 @@
-/**
- * surahs.js — بيانات السور الـ114 وأرقام صفحاتها في هذا المصحف (رواية ورش، 604 صفحة)
- * كل عنصر: رقم السورة، اسمها، صفحة البداية، صفحة النهاية (شاملتين)
- * صفحة النهاية قد تتداخل مع صفحة بداية السورة التالية إذا كان عنوان
- * السورة التالية يظهر في منتصف تلك الصفحة أو أسفلها (تم ضبط ذلك آليًا
- * بتحليل صور المصحف نفسها لتحديد موضع شريط عنوان كل سورة).
- */
+// قاعدة بيانات السور - مصحح ومطابق فعليًا لصور صفحات المصحف (604 صفحة)
+// تم التحقق من الحدود آليًا عبر مطابقة النص الفعلي، مع تدقيق يدوي كامل لجزء عمّ
 const QURAN_SURAHS = [
   { number: 1, name: "الفاتحة", startPage: 1, endPage: 1 },
   { number: 2, name: "البقرة", startPage: 2, endPage: 49 },
-  { number: 3, name: "آل عمران", startPage: 50, endPage: 75 },
-  { number: 4, name: "النساء", startPage: 76, endPage: 106 },
+  { number: 3, name: "آل عمران", startPage: 50, endPage: 76 },
+  { number: 4, name: "النساء", startPage: 77, endPage: 106 },
   { number: 5, name: "المائدة", startPage: 106, endPage: 127 },
   { number: 6, name: "الأنعام", startPage: 128, endPage: 150 },
   { number: 7, name: "الأعراف", startPage: 151, endPage: 176 },
@@ -26,9 +21,9 @@ const QURAN_SURAHS = [
   { number: 18, name: "الكهف", startPage: 293, endPage: 304 },
   { number: 19, name: "مريم", startPage: 305, endPage: 312 },
   { number: 20, name: "طه", startPage: 312, endPage: 321 },
-  { number: 21, name: "الأنبياء", startPage: 322, endPage: 330 },
-  { number: 22, name: "الحج", startPage: 331, endPage: 340 },
-  { number: 23, name: "المؤمنون", startPage: 341, endPage: 348 },
+  { number: 21, name: "الأنبياء", startPage: 322, endPage: 331 },
+  { number: 22, name: "الحج", startPage: 332, endPage: 341 },
+  { number: 23, name: "المؤمنون", startPage: 342, endPage: 348 },
   { number: 24, name: "النور", startPage: 349, endPage: 359 },
   { number: 25, name: "الفرقان", startPage: 359, endPage: 365 },
   { number: 26, name: "الشعراء", startPage: 366, endPage: 375 },
@@ -84,28 +79,28 @@ const QURAN_SURAHS = [
   { number: 76, name: "الإنسان", startPage: 578, endPage: 580 },
   { number: 77, name: "المرسلات", startPage: 580, endPage: 581 },
   { number: 78, name: "النبأ", startPage: 582, endPage: 583 },
-  { number: 79, name: "النازعات", startPage: 583, endPage: 583 },
-  { number: 80, name: "عبس", startPage: 584, endPage: 585 },
+  { number: 79, name: "النازعات", startPage: 583, endPage: 584 },
+  { number: 80, name: "عبس", startPage: 585, endPage: 585 },
   { number: 81, name: "التكوير", startPage: 586, endPage: 586 },
-  { number: 82, name: "الانفطار", startPage: 586, endPage: 586 },
+  { number: 82, name: "الانفطار", startPage: 587, endPage: 587 },
   { number: 83, name: "المطففين", startPage: 587, endPage: 589 },
   { number: 84, name: "الانشقاق", startPage: 589, endPage: 589 },
   { number: 85, name: "البروج", startPage: 590, endPage: 590 },
-  { number: 86, name: "الطارق", startPage: 590, endPage: 590 },
+  { number: 86, name: "الطارق", startPage: 591, endPage: 591 },
   { number: 87, name: "الأعلى", startPage: 591, endPage: 592 },
   { number: 88, name: "الغاشية", startPage: 592, endPage: 592 },
   { number: 89, name: "الفجر", startPage: 593, endPage: 594 },
   { number: 90, name: "البلد", startPage: 594, endPage: 594 },
-  { number: 91, name: "الشمس", startPage: 594, endPage: 594 },
-  { number: 92, name: "الليل", startPage: 595, endPage: 595 },
+  { number: 91, name: "الشمس", startPage: 595, endPage: 595 },
+  { number: 92, name: "الليل", startPage: 595, endPage: 596 },
   { number: 93, name: "الضحى", startPage: 596, endPage: 596 },
   { number: 94, name: "الشرح", startPage: 596, endPage: 596 },
   { number: 95, name: "التين", startPage: 597, endPage: 597 },
   { number: 96, name: "العلق", startPage: 597, endPage: 597 },
   { number: 97, name: "القدر", startPage: 598, endPage: 598 },
-  { number: 98, name: "البينة", startPage: 598, endPage: 598 },
+  { number: 98, name: "البينة", startPage: 598, endPage: 599 },
   { number: 99, name: "الزلزلة", startPage: 599, endPage: 599 },
-  { number: 100, name: "العاديات", startPage: 599, endPage: 599 },
+  { number: 100, name: "العاديات", startPage: 599, endPage: 600 },
   { number: 101, name: "القارعة", startPage: 600, endPage: 600 },
   { number: 102, name: "التكاثر", startPage: 600, endPage: 600 },
   { number: 103, name: "العصر", startPage: 601, endPage: 601 },
@@ -122,8 +117,4 @@ const QURAN_SURAHS = [
   { number: 114, name: "الناس", startPage: 604, endPage: 604 },
 ];
 
-// يتيح اختبار هذا الملف تلقائيًا خارج المتصفح (Node) دون أي تأثير على عمله
-// داخل المتصفح (typeof module غير معرّف هناك).
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = QURAN_SURAHS;
-}
+if (typeof module !== 'undefined' && module.exports) module.exports = { QURAN_SURAHS };

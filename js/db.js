@@ -1,52 +1,25 @@
 /**
  * db.js — طبقة التخزين المحلي (IndexedDB)
- *
- * === إعادة تصميم معماري (v3) ===
- * لم يعد أي تسجيل يعتمد على رقم الصفحة وحده كمفتاح إطلاقًا. كل تسجيل الآن
- * مرتبط بسورة أولاً، ثم بالصفحات التي تخصّه:
- *
- *  - "surahRecordings"   تسجيل واحد متصل لكل سورة كاملة، مفتاحه رقم السورة
- *                         (1-114). كما كان سابقًا، مع إثراء الحقول الوصفية
- *                         (اسم السورة، صفحة البداية/النهاية، تاريخ التحديث).
- *
- *  - "pageRecordings"    تسجيل مستقل لكل صفحة *ضمن سورة معيّنة*. مفتاحه معرّف
- *                         مركّب "surahId_page" (مثال: "58_545"). هذا يحل مشكلة
- *                         الصفحات التي تضم أكثر من سورة (مثل صفحة 545: نهاية
- *                         سورة المجادلة + بداية سورة الحشر): تسجيل صفحة 545
- *                         الخاص بسورة المجادلة ("58_545") وتسجيل صفحة 545
- *                         الخاص بسورة الحشر ("59_545") يُخزَّنان بشكل مستقل
- *                         تمامًا ولا يتعارضان أو يستبدل أحدهما الآخر أبدًا،
- *                         مهما كان رقم الصفحة مشتركًا بينهما.
- *
- *  - "recordings"        (قديم/Legacy) — الشكل السابق قبل هذا الإصلاح:
- *                         تسجيل واحد لكل رقم صفحة فقط، دون أي معرفة بالسورة
- *                         (وهذا بالضبط ما كان يسبب استبدال تسجيل سورة بأخرى
- *                         عند تشارُكهما نفس الصفحة). يبقى هذا المخزن هنا فقط
- *                         ليقرأ منه التطبيق مرة واحدة عند أول تشغيل بعد
- *                         التحديث، وينقل بياناته تلقائيًا (انظر
- *                         migrateLegacyRecordings في app.js) إلى إمّا
- *                         "pageRecordings" مباشرة (إن كانت صفحته تخص سورة
- *                         واحدة فقط بلا لبس) أو إلى "pendingRecordings" (إن
- *                         كانت الصفحة تضم أكثر من سورة ولا يمكن معرفة أيّهما
- *                         قصد المستخدم تلقائيًا). بعد الترحيل يصبح فارغًا تمامًا
- *                         ولا يُستخدَم بعد ذلك إطلاقًا.
- *
- *  - "pendingRecordings" تسجيلات قديمة تعذّر ترحيلها تلقائيًا (لأن صفحتها
- *                         القديمة كانت تضم أكثر من سورة)، فتبقى هنا حتى يختار
- *                         المستخدم يدويًا السورة الصحيحة لها مرة واحدة فقط،
- *                         عندها تُنقَل إلى "pageRecordings" وتُحذف من هنا.
- *
+ * يخزن:
+ *  - "recordings"       تسجيل لكل صفحة من صفحات المصحف (1-604)
+ *  - "surahRecordings"  تسجيل واحد متصل لكل سورة كاملة (1-114)
+ *  - "hizbRecordings"   تسجيل واحد متصل لكل حزب كامل (1-60)
+ *  - "testRecordings"   تسجيلات إجابات اختبار الحفظ (لكل سؤال داخل كل حزب)
+ *  - "usedQuestions"    تتبع الأسئلة المستخدمة سابقًا في كل حزب (لعدم التكرار)
+ *  - "recordingHistory" أرشيف كل نسخ التسجيل السابقة لكل صفحة/سورة/حزب (سجل التقدّم)
  * لا يعتمد على أي اتصال بالإنترنت — كل شيء محفوظ على الجهاز فقط.
  */
 
 const QuranDB = (() => {
   const DB_NAME = "quranReviewDB";
-  const DB_VERSION = 3;
-
-  const LEGACY_PAGE_STORE = "recordings";
-  const PAGE_STORE = "pageRecordings";
+  const DB_VERSION = 6;
+  const STORE = "recordings";
   const SURAH_STORE = "surahRecordings";
-  const PENDING_STORE = "pendingRecordings";
+  const HIZB_STORE = "hizbRecordings";
+  const TEST_STORE = "testRecordings";
+  const USED_Q_STORE = "usedQuestions";
+  const HISTORY_STORE = "recordingHistory";
+  const ERROR_MARKS_STORE = "errorMarks";
 
   let dbPromise = null;
 
@@ -56,161 +29,97 @@ const QuranDB = (() => {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = (e) => {
         const db = e.target.result;
-
-        // القديم: يُبقى كما هو تمامًا بلا أي تعديل على شكله، ليقرأ منه
-        // الترحيل التلقائي (app.js) قبل أن يفرغ ويصبح غير مستخدَم.
-        if (!db.objectStoreNames.contains(LEGACY_PAGE_STORE)) {
-          db.createObjectStore(LEGACY_PAGE_STORE, { keyPath: "page" });
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE, { keyPath: "page" });
         }
-
         if (!db.objectStoreNames.contains(SURAH_STORE)) {
           db.createObjectStore(SURAH_STORE, { keyPath: "surah" });
         }
-
-        if (!db.objectStoreNames.contains(PAGE_STORE)) {
-          const store = db.createObjectStore(PAGE_STORE, { keyPath: "id" });
-          store.createIndex("by_page", "page", { unique: false });
-          store.createIndex("by_surah", "surahId", { unique: false });
+        if (!db.objectStoreNames.contains(HIZB_STORE)) {
+          db.createObjectStore(HIZB_STORE, { keyPath: "hizb" });
         }
-
-        if (!db.objectStoreNames.contains(PENDING_STORE)) {
-          db.createObjectStore(PENDING_STORE, { keyPath: "page" });
+        if (!db.objectStoreNames.contains(TEST_STORE)) {
+          const ts = db.createObjectStore(TEST_STORE, { keyPath: "id" });
+          ts.createIndex("byHizbAttempt", ["hizb", "attemptId"], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(USED_Q_STORE)) {
+          db.createObjectStore(USED_Q_STORE, { keyPath: "hizb" });
+        }
+        if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+          const hs = db.createObjectStore(HISTORY_STORE, { keyPath: "id" });
+          hs.createIndex("byTypeTarget", ["type", "targetId"], { unique: false });
+        }
+        if (!db.objectStoreNames.contains(ERROR_MARKS_STORE)) {
+          db.createObjectStore(ERROR_MARKS_STORE, { keyPath: "page" });
         }
       };
       req.onsuccess = (e) => resolve(e.target.result);
       req.onerror = (e) => reject(e.target.error);
+      // يحدث هذا عادةً إن كان التطبيق مفتوحًا في تبويب آخر بنسخة أقدم — بدون هذا
+      // المعالج يظل الطلب معلَّقًا للأبد دون resolve أو reject، فتتجمّد كل أزرار
+      // التطبيق (قائمة الاستماع والاختبار وغيرهما) بصمت دون أي خطأ ظاهر.
+      req.onblocked = () => {
+        dbPromise = null;
+        reject(new Error("التطبيق مفتوح في تبويب آخر — أغلق التبويبات الأخرى لهذا التطبيق ثم أعد المحاولة"));
+      };
     });
     return dbPromise;
   }
 
-  // معرّف فريد دائمًا: يجمع رقم السورة مع رقم الصفحة، فلا يتعارض أبدًا مع
-  // تسجيل صفحة أخرى من سورة مختلفة حتى لو كان رقم الصفحة نفسه.
-  function pageRecordId(surahId, page) {
-    return `${surahId}_${page}`;
-  }
-
-  // ===================================================================
-  // تسجيلات صفحات ضمن سورة (الجديد — يحل محل "recordings" القديم)
-  // ===================================================================
-
-  async function savePageRecording({ surahId, surahName, page, startPage, endPage, blob, duration }) {
-    if (surahId == null || page == null) {
-      throw new Error("savePageRecording: surahId و page مطلوبان");
-    }
-    const db = await open();
-    const id = pageRecordId(surahId, page);
+  function txDone(tx) {
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(PAGE_STORE, "readwrite");
-      const store = tx.objectStore(PAGE_STORE);
-      const getReq = store.get(id);
-      getReq.onsuccess = () => {
-        const prev = getReq.result;
-        const now = Date.now();
-        store.put({
-          id,
-          surahId,
-          surahName: surahName || null,
-          page,
-          startPage: startPage != null ? startPage : page,
-          endPage: endPage != null ? endPage : page,
-          // لا يوجد حاليًا مصدر بيانات لأرقام الآيات في هذا التطبيق (رواية
-          // ورش لها تقسيم آيات مختلف عن حفص)، فتُترك محجوزة لتوسّع مستقبلي.
-          startAyah: null,
-          endAyah: null,
-          duration,
-          mimeType: blob.type,
-          blob,
-          createdAt: (prev && prev.createdAt) || now,
-          updatedAt: now,
-        });
-      };
       tx.oncomplete = () => resolve(true);
       tx.onerror = (e) => reject(e.target.error);
+      tx.onabort = (e) => reject(e.target.error);
     });
   }
 
-  async function getPageRecordingById(id) {
+  // ===== تسجيلات الصفحات =====
+  async function saveRecording(page, blob, duration) {
+    const db = await open();
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put({ page, blob, duration, mimeType: blob.type, createdAt: Date.now() });
+    return txDone(tx);
+  }
+
+  async function getRecording(page) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(PAGE_STORE, "readonly");
-      const req = tx.objectStore(PAGE_STORE).get(id);
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(page);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = (e) => reject(e.target.error);
     });
   }
 
-  async function getPageRecording(surahId, page) {
-    return getPageRecordingById(pageRecordId(surahId, page));
+  async function deleteRecording(page) {
+    const db = await open();
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(page);
+    return txDone(tx);
   }
 
-  async function deletePageRecordingById(id) {
+  async function hasRecording(page) {
+    const rec = await getRecording(page);
+    return !!rec;
+  }
+
+  async function getAllPageNumbers() {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(PAGE_STORE, "readwrite");
-      tx.objectStore(PAGE_STORE).delete(id);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  async function deletePageRecording(surahId, page) {
-    return deletePageRecordingById(pageRecordId(surahId, page));
-  }
-
-  // كل تسجيلات الصفحات الموجودة لصفحة معيّنة (قد تكون أكثر من واحد إن
-  // كانت الصفحة تضم أكثر من سورة).
-  async function getRecordingsForPage(page) {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PAGE_STORE, "readonly");
-      const req = tx.objectStore(PAGE_STORE).index("by_page").getAll(page);
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).getAllKeys();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = (e) => reject(e.target.error);
     });
   }
 
-  async function getAllPageRecordings() {
+  // ===== تسجيلات السور الكاملة =====
+  async function saveSurahRecording(surah, blob, duration) {
     const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PAGE_STORE, "readonly");
-      const req = tx.objectStore(PAGE_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  // ===================================================================
-  // تسجيلات السور الكاملة (المفتاح كما هو: رقم السورة فقط)
-  // ===================================================================
-
-  async function saveSurahRecording(surah, blob, duration, meta) {
-    meta = meta || {};
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(SURAH_STORE, "readwrite");
-      const store = tx.objectStore(SURAH_STORE);
-      const getReq = store.get(surah);
-      getReq.onsuccess = () => {
-        const prev = getReq.result;
-        const now = Date.now();
-        store.put({
-          surah,
-          surahId: surah,
-          surahName: meta.surahName || null,
-          startPage: meta.startPage != null ? meta.startPage : null,
-          endPage: meta.endPage != null ? meta.endPage : null,
-          startAyah: null,
-          endAyah: null,
-          blob,
-          duration,
-          mimeType: blob.type,
-          createdAt: (prev && prev.createdAt) || now,
-          updatedAt: now,
-        });
-      };
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    });
+    const tx = db.transaction(SURAH_STORE, "readwrite");
+    tx.objectStore(SURAH_STORE).put({ surah, blob, duration, mimeType: blob.type, createdAt: Date.now() });
+    return txDone(tx);
   }
 
   async function getSurahRecording(surah) {
@@ -225,12 +134,9 @@ const QuranDB = (() => {
 
   async function deleteSurahRecording(surah) {
     const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(SURAH_STORE, "readwrite");
-      tx.objectStore(SURAH_STORE).delete(surah);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    });
+    const tx = db.transaction(SURAH_STORE, "readwrite");
+    tx.objectStore(SURAH_STORE).delete(surah);
+    return txDone(tx);
   }
 
   async function hasSurahRecording(surah) {
@@ -248,81 +154,226 @@ const QuranDB = (() => {
     });
   }
 
-  // ===================================================================
-  // القديم (Legacy) — قراءة وحذف لغرض الترحيل التلقائي فقط
-  // ===================================================================
+  // ===== تسجيلات الأحزاب الكاملة (جديد) =====
+  async function saveHizbRecording(hizb, blob, duration, meta) {
+    const db = await open();
+    const tx = db.transaction(HIZB_STORE, "readwrite");
+    tx.objectStore(HIZB_STORE).put({
+      hizb, blob, duration, mimeType: blob.type, createdAt: Date.now(),
+      hizbName: meta && meta.hizbName,
+      startSurahName: meta && meta.startSurahName,
+      endSurahName: meta && meta.endSurahName,
+      startPage: meta && meta.startPage,
+      endPage: meta && meta.endPage,
+    });
+    return txDone(tx);
+  }
 
-  async function getAllLegacyPageRecordings() {
+  async function getHizbRecording(hizb) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(LEGACY_PAGE_STORE, "readonly");
-      const req = tx.objectStore(LEGACY_PAGE_STORE).getAll();
+      const tx = db.transaction(HIZB_STORE, "readonly");
+      const req = tx.objectStore(HIZB_STORE).get(hizb);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async function deleteHizbRecording(hizb) {
+    const db = await open();
+    const tx = db.transaction(HIZB_STORE, "readwrite");
+    tx.objectStore(HIZB_STORE).delete(hizb);
+    return txDone(tx);
+  }
+
+  async function hasHizbRecording(hizb) {
+    const rec = await getHizbRecording(hizb);
+    return !!rec;
+  }
+
+  async function getAllHizbNumbers() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(HIZB_STORE, "readonly");
+      const req = tx.objectStore(HIZB_STORE).getAllKeys();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = (e) => reject(e.target.error);
     });
   }
 
-  async function deleteLegacyPageRecording(page) {
+  // ===== تسجيلات اختبار الحفظ (جديد) =====
+  // كل تسجيل سؤال يُحفظ بمعرّف فريد: hizb + attemptId + qid
+  async function saveTestRecording({ hizb, attemptId, qid, questionNumber, page, surah, surahName, ayah, prefix, blob, duration, type, fromPage, toPage, nextSurahName }) {
     const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(LEGACY_PAGE_STORE, "readwrite");
-      tx.objectStore(LEGACY_PAGE_STORE).delete(page);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
+    const id = `${hizb}_${attemptId}_${qid}`;
+    const tx = db.transaction(TEST_STORE, "readwrite");
+    tx.objectStore(TEST_STORE).put({
+      id, hizb, attemptId, qid, questionNumber, page, surah, surahName, ayah, prefix,
+      type: type || "random", fromPage: fromPage || null, toPage: toPage || null, nextSurahName: nextSurahName || null,
+      blob, duration, mimeType: blob.type, createdAt: Date.now(),
     });
+    return txDone(tx);
   }
 
-  // ===================================================================
-  // تسجيلات بانتظار تعيين السورة يدويًا (نتيجة ترحيل غامض)
-  // ===================================================================
-
-  async function savePendingRecording(entry) {
+  async function getTestRecordingsForAttempt(hizb, attemptId) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(PENDING_STORE, "readwrite");
-      tx.objectStore(PENDING_STORE).put(entry);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  async function getAllPendingRecordings() {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(PENDING_STORE, "readonly");
-      const req = tx.objectStore(PENDING_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
+      const tx = db.transaction(TEST_STORE, "readonly");
+      const idx = tx.objectStore(TEST_STORE).index("byHizbAttempt");
+      const range = IDBKeyRange.only([hizb, attemptId]);
+      const req = idx.getAll(range);
+      req.onsuccess = () => resolve((req.result || []).sort((a, b) => a.questionNumber - b.questionNumber));
       req.onerror = (e) => reject(e.target.error);
     });
   }
 
-  async function deletePendingRecording(page) {
+  async function getAllTestRecordingsForHizb(hizb) {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(PENDING_STORE, "readwrite");
-      tx.objectStore(PENDING_STORE).delete(page);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
+      const tx = db.transaction(TEST_STORE, "readonly");
+      const store = tx.objectStore(TEST_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => resolve((req.result || []).filter((r) => r.hizb === hizb));
+      req.onerror = (e) => reject(e.target.error);
     });
+  }
+
+  async function deleteTestRecording(id) {
+    const db = await open();
+    const tx = db.transaction(TEST_STORE, "readwrite");
+    tx.objectStore(TEST_STORE).delete(id);
+    return txDone(tx);
+  }
+
+  async function deleteAttempt(hizb, attemptId) {
+    const recs = await getTestRecordingsForAttempt(hizb, attemptId);
+    const db = await open();
+    const tx = db.transaction(TEST_STORE, "readwrite");
+    const store = tx.objectStore(TEST_STORE);
+    recs.forEach((r) => store.delete(r.id));
+    return txDone(tx);
+  }
+
+  // ===== تتبع الأسئلة المستخدمة لكل حزب (لعدم تكرار نفس المقاطع) =====
+  async function getUsedQuestionIds(hizb) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(USED_Q_STORE, "readonly");
+      const req = tx.objectStore(USED_Q_STORE).get(hizb);
+      req.onsuccess = () => resolve((req.result && req.result.usedIds) || []);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async function addUsedQuestionIds(hizb, qids) {
+    const existing = await getUsedQuestionIds(hizb);
+    const merged = Array.from(new Set([...existing, ...qids]));
+    const db = await open();
+    const tx = db.transaction(USED_Q_STORE, "readwrite");
+    tx.objectStore(USED_Q_STORE).put({ hizb, usedIds: merged, updatedAt: Date.now() });
+    return txDone(tx);
+  }
+
+  async function resetUsedQuestionIds(hizb) {
+    const db = await open();
+    const tx = db.transaction(USED_Q_STORE, "readwrite");
+    tx.objectStore(USED_Q_STORE).put({ hizb, usedIds: [], updatedAt: Date.now() });
+    return txDone(tx);
+  }
+
+  // ===== علامات مواضع الأخطاء على صورة الصفحة =====
+  // كل صفحة تُخزَّن بسجل واحد يضم كل دوائرها، بإحداثيات نسبية (% من عرض/ارتفاع
+  // الصورة) لتبقى في مكانها الصحيح مهما تغيّر حجم الشاشة. يبقى سجل الصفحة
+  // موجودًا حتى بعد حذف كل علاماتها (بمصفوفة فارغة) ليظهر "0" في الإحصائيات
+  // كدليل تحسّن، بدل اختفاء الصفحة من القائمة كليًا.
+  async function getErrorMarks(page) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(ERROR_MARKS_STORE, "readonly");
+      const req = tx.objectStore(ERROR_MARKS_STORE).get(page);
+      req.onsuccess = () => resolve((req.result && req.result.marks) || []);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async function saveErrorMarks(page, marks) {
+    const db = await open();
+    const tx = db.transaction(ERROR_MARKS_STORE, "readwrite");
+    tx.objectStore(ERROR_MARKS_STORE).put({ page, marks, updatedAt: Date.now() });
+    return txDone(tx);
+  }
+
+  async function getAllErrorMarkPages() {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(ERROR_MARKS_STORE, "readonly");
+      const req = tx.objectStore(ERROR_MARKS_STORE).getAll();
+      req.onsuccess = () => resolve((req.result || []).sort((a, b) => a.page - b.page));
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  // ملاذ أخير للتعافي: يحذف قاعدة البيانات المحلية بالكامل (كل التسجيلات) ليُعاد
+  // إنشاؤها من جديد بأحدث بنية. تُستخدم فقط إن تعذّر الإصلاح التلقائي عبر ترقية
+  // الإصدار العادية (مثلاً إن كانت قاعدة البيانات في حالة غير متّسقة لسبب ما).
+  function resetAll() {
+    dbPromise = null;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve(true);
+      req.onerror = (e) => reject(e.target.error);
+      req.onblocked = () => reject(new Error("أغلق كل التبويبات الأخرى المفتوحة لهذا التطبيق ثم أعد المحاولة"));
+    });
+  }
+
+  // ===== أرشيف سجل التقدّم: كل نسخة تسجيل سابقة (لا تُحذف عند إعادة التسجيل) =====
+  async function saveHistoryEntry({ type, targetId, blob, duration, label }) {
+    const db = await open();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const id = `${type}_${targetId}_${Date.now()}_${rand}`;
+    const tx = db.transaction(HISTORY_STORE, "readwrite");
+    tx.objectStore(HISTORY_STORE).put({
+      id, type, targetId, blob, duration, label: label || "",
+      mimeType: blob.type, createdAt: Date.now(),
+    });
+    return txDone(tx);
+  }
+
+  async function getHistoryForTarget(type, targetId) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(HISTORY_STORE, "readonly");
+      const idx = tx.objectStore(HISTORY_STORE).index("byTypeTarget");
+      const req = idx.getAll(IDBKeyRange.only([type, targetId]));
+      req.onsuccess = () => resolve((req.result || []).sort((a, b) => a.createdAt - b.createdAt));
+      req.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  async function deleteHistoryEntry(id) {
+    const db = await open();
+    const tx = db.transaction(HISTORY_STORE, "readwrite");
+    tx.objectStore(HISTORY_STORE).delete(id);
+    return txDone(tx);
+  }
+
+  async function clearHistoryForTarget(type, targetId) {
+    const entries = await getHistoryForTarget(type, targetId);
+    const db = await open();
+    const tx = db.transaction(HISTORY_STORE, "readwrite");
+    const store = tx.objectStore(HISTORY_STORE);
+    entries.forEach((e) => store.delete(e.id));
+    return txDone(tx);
   }
 
   return {
-    // تسجيلات صفحات ضمن سورة (الجديد)
-    savePageRecording, getPageRecording, getPageRecordingById,
-    deletePageRecording, deletePageRecordingById,
-    getRecordingsForPage, getAllPageRecordings,
-    // تسجيلات سور كاملة
-    saveSurahRecording, getSurahRecording, deleteSurahRecording,
-    hasSurahRecording, getAllSurahNumbers,
-    // قديم/ترحيل
-    getAllLegacyPageRecordings, deleteLegacyPageRecording,
-    // بانتظار تعيين يدوي
-    savePendingRecording, getAllPendingRecordings, deletePendingRecording,
+    saveRecording, getRecording, deleteRecording, hasRecording, getAllPageNumbers,
+    saveSurahRecording, getSurahRecording, deleteSurahRecording, hasSurahRecording, getAllSurahNumbers,
+    saveHizbRecording, getHizbRecording, deleteHizbRecording, hasHizbRecording, getAllHizbNumbers,
+    saveTestRecording, getTestRecordingsForAttempt, getAllTestRecordingsForHizb, deleteTestRecording, deleteAttempt,
+    getUsedQuestionIds, addUsedQuestionIds, resetUsedQuestionIds,
+    saveHistoryEntry, getHistoryForTarget, deleteHistoryEntry, clearHistoryForTarget,
+    getErrorMarks, saveErrorMarks, getAllErrorMarkPages,
+    resetAll,
   };
 })();
-
-// يتيح اختبار هذا الملف تلقائيًا خارج المتصفح (Node + fake-indexeddb) دون أي
-// تأثير على عمله داخل المتصفح (typeof module غير معرّف هناك).
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = QuranDB;
-}
