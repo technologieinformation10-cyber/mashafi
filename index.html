@@ -15,6 +15,11 @@
 
 <div class="app-shell">
 
+  <div id="fileProtocolWarning" class="file-protocol-warning hidden">
+    <p>⚠️ يبدو أنك تفتح التطبيق مباشرة من ملف (وليس عبر خادم/رابط ويب). بعض الميزات مثل قائمة الاستماع واختبار حفظ الأحزاب قد لا تعمل بشكل صحيح بهذه الطريقة. للحصول على أفضل تجربة، ارفع مجلد التطبيق على استضافة ويب (حتى مجانية) أو افتحه عبر خادم محلي.</p>
+    <button id="dismissFileWarning" type="button">فهمت، إخفاء هذه الرسالة</button>
+  </div>
+
   <!-- الرأس -->
   <header class="app-header">
     <div class="header-motif" aria-hidden="true">
@@ -26,13 +31,14 @@
     <p class="app-subtitle">سجّل تلاوتك وراجعها بلا حدود</p>
   </header>
 
-  <!-- تبديل الوضع: صفحة / سورة كاملة -->
+  <!-- تبديل الوضع: صفحة / سورة كاملة / حزب كامل -->
   <div class="mode-tabs" id="modeTabs">
     <button id="modePageBtn" class="mode-tab active" data-mode="page">تسجيل صفحة</button>
-    <button id="modeSurahBtn" class="mode-tab" data-mode="surah">تسجيل سورة كاملة</button>
+    <button id="modeSurahBtn" class="mode-tab" data-mode="surah">تسجيل سورة</button>
+    <button id="modeHizbBtn" class="mode-tab" data-mode="hizb">تسجيل حزب</button>
   </div>
 
-  <!-- شريط التنقل بين الصفحات / السور -->
+  <!-- شريط التنقل بين الصفحات / السور / الأحزاب -->
   <nav class="page-nav" id="pageNav" aria-label="التنقل">
     <button id="prevPage" class="nav-btn" aria-label="السابق">›</button>
 
@@ -47,6 +53,11 @@
       <select id="surahSelect"></select>
     </div>
 
+    <div class="surah-picker hidden" id="hizbPicker">
+      <label for="hizbSelect" class="sr-only">اختر الحزب</label>
+      <select id="hizbSelect"></select>
+    </div>
+
     <button id="nextPage" class="nav-btn" aria-label="التالي">‹</button>
   </nav>
 
@@ -55,6 +66,8 @@
     <button id="surahShrinkBtn" class="range-edit-btn" type="button">– إزالة آخر صفحة من السورة</button>
     <button id="surahExtendBtn" class="range-edit-btn" type="button">+ ضمّ الصفحة التالية للسورة</button>
   </div>
+
+  <div class="surah-range hidden" id="hizbRange"></div>
 
   <!-- شريط حالة قائمة الاستماع (يظهر فقط أثناء تشغيل قائمة) -->
   <div class="queue-bar hidden" id="queueBar">
@@ -78,13 +91,7 @@
       <div class="page-status">
         <span id="pageNumberLabel">الصفحة 1</span>
         <span id="recordedBadge" class="badge hidden">مسجَّلة</span>
-      </div>
-
-      <!-- بطاقات مستقلة لكل سورة عندما تضم الصفحة الحالية أكثر من سورة واحدة
-           (مثال: صفحة 545 تضم نهاية سورة المجادلة وبداية سورة الحشر) -->
-      <div class="page-surah-list hidden" id="pageSurahList">
-        <p class="surah-record-hint">هذه الصفحة تضم أكثر من سورة، ولكل سورة تسجيلها المستقل — اختر أيّها تريد التعامل معه:</p>
-        <div id="pageSurahListBody"></div>
+        <span id="errorCountBadge" class="badge error-count-badge hidden">عدد الأخطاء الحالية: 0</span>
       </div>
 
       <!-- صورة صفحة المصحف -->
@@ -93,6 +100,15 @@
         <div id="pageImagePlaceholder" class="page-image-placeholder">
           لم تُضَف صورة هذه الصفحة بعد
         </div>
+        <div id="errorMarksLayer" class="error-marks-layer"></div>
+      </div>
+
+      <div class="error-mark-controls">
+        <button id="markErrorModeBtn" class="mark-mode-btn" type="button" aria-pressed="false">
+          <span aria-hidden="true">⭕</span>
+          <span>وضع علامة خطأ</span>
+        </button>
+        <p class="mark-mode-hint hidden" id="markModeHint">الوضع مفعَّل — اضغط على أي مكان في الصورة لوضع علامة، أو اضغط على علامة موجودة لحذفها.</p>
       </div>
 
       <!-- حلقة التقدم / التكرار حول زر التشغيل -->
@@ -128,7 +144,7 @@
         </button>
         <span id="recTimer" class="rec-timer hidden">0:00</span>
       </div>
-      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك تقليب صفحات السورة أثناء التسجيل، ويستمر التسجيل متصلاً حتى تضغط إيقاف.</p>
+      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك تقليب الصفحات أثناء التسجيل، ويستمر التسجيل متصلاً حتى تضغط إيقاف.</p>
 
       <!-- أزرار التشغيل -->
       <div class="control-row playback-row">
@@ -187,10 +203,28 @@
         <span>اختبار ترتيب السور في كل جزء</span>
       </button>
 
-      <!-- زر تسجيلات قديمة تحتاج تعيين سورة (يظهر فقط عند وجودها) -->
-      <button id="pendingBtn" class="playlist-open-btn hidden">
-        <span class="playlist-icon" aria-hidden="true">⚠️</span>
-        <span id="pendingBtnLabel">تسجيلات قديمة تحتاج تعيين السورة</span>
+      <!-- زر فتح اختبار حفظ الأحزاب -->
+      <button id="hizbTestBtn" class="playlist-open-btn accent">
+        <span class="playlist-icon" aria-hidden="true">🎯</span>
+        <span>اختبار حفظ الأحزاب (تسميع بالصوت)</span>
+      </button>
+
+      <!-- زر فتح حالة الحفظ -->
+      <button id="reminderBtn" class="playlist-open-btn">
+        <span class="playlist-icon" aria-hidden="true">📊</span>
+        <span>حالة الحفظ لكل الأحزاب</span>
+      </button>
+
+      <!-- زر فتح سجل التقدّم الصوتي -->
+      <button id="progressLogBtn" class="playlist-open-btn">
+        <span class="playlist-icon" aria-hidden="true">📈</span>
+        <span>سجل التقدّم — اسمع نفسك تتحسّن</span>
+      </button>
+
+      <!-- زر فتح إحصائيات الأخطاء -->
+      <button id="errorStatsBtn" class="playlist-open-btn">
+        <span class="playlist-icon" aria-hidden="true">📍</span>
+        <span>إحصائيات مواضع الأخطاء</span>
       </button>
 
     </div>
@@ -209,6 +243,17 @@
   <img id="lightboxImg" alt="صورة صفحة المصحف مكبَّرة">
 </div>
 
+<!-- نافذة تأكيد عامة (تُستخدم لحذف تسجيلات قائمة الاستماع وغيرها) -->
+<div id="confirmModal" class="modal hidden confirm-modal-overlay" role="alertdialog" aria-label="تأكيد">
+  <div class="modal-card confirm-card">
+    <p id="confirmMessage" class="confirm-message">هل أنت متأكد؟</p>
+    <div class="confirm-actions">
+      <button id="confirmCancelBtn" class="ctrl-btn" type="button">إلغاء</button>
+      <button id="confirmOkBtn" class="ctrl-btn danger" type="button">حذف</button>
+    </div>
+  </div>
+</div>
+
 <!-- نافذة قائمة الاستماع -->
 <div id="playlistModal" class="modal hidden" role="dialog" aria-label="قائمة الاستماع">
   <div class="modal-card">
@@ -216,9 +261,9 @@
       <h2>قائمة الاستماع</h2>
       <button id="closePlaylistModal" class="modal-close" aria-label="إغلاق">×</button>
     </div>
-    <p class="modal-hint">اختر عدة مقاطع (صفحات أو سور مسجَّلة) لتشغيلها الواحد تلو الآخر بترتيب اختيارك. اضغط على المقطع لإضافته أو إزالته من الترتيب.</p>
+    <p class="modal-hint">اضغط على اسم المقطع لإضافته لترتيب التشغيل، أو استخدم الأزرار: ▶ تشغيل مباشر، 🔁 إعادة، ✏️ إعادة تسجيل، 🗑 حذف.</p>
     <div class="modal-body" id="playlistBody">
-      <p class="playlist-empty" id="playlistEmptyMsg">لا توجد تسجيلات محفوظة بعد. سجّل بعض الصفحات أو السور أولًا.</p>
+      <p class="playlist-empty" id="playlistEmptyMsg">لا توجد تسجيلات محفوظة بعد. سجّل بعض الصفحات أو السور أو الأحزاب أولًا.</p>
     </div>
     <div class="modal-footer">
       <button id="clearPlaylistBtn" class="ctrl-btn">مسح التحديد</button>
@@ -255,21 +300,118 @@
   </div>
 </div>
 
-<!-- نافذة تسجيلات قديمة تحتاج تعيين سورة -->
-<div id="pendingModal" class="modal hidden" role="dialog" aria-label="تسجيلات تحتاج إلى تعيين السورة">
+<!-- نافذة اختبار حفظ الأحزاب -->
+<div id="hizbTestModal" class="modal hidden" role="dialog" aria-label="اختبار حفظ الأحزاب">
   <div class="modal-card">
     <div class="modal-header">
-      <h2>تسجيلات تحتاج تعيين السورة</h2>
-      <button id="closePendingModal" class="modal-close" aria-label="إغلاق">×</button>
+      <h2>اختبار حفظ الأحزاب</h2>
+      <button id="closeHizbTestModal" class="modal-close" aria-label="إغلاق">×</button>
     </div>
-    <p class="modal-hint">هذه تسجيلات قديمة كانت محفوظة برقم الصفحة فقط، وصفحتها تضم أكثر من سورة، فتعذّر على التطبيق تحديد السورة الصحيحة تلقائيًا. استمع للتسجيل ثم اختر السورة الصحيحة له مرة واحدة، أو احذفه إن لم تعد بحاجته.</p>
-    <div class="modal-body" id="pendingBody"></div>
+
+    <!-- شاشة الاختيار -->
+    <div id="hizbTestSetup" class="hizb-test-setup">
+      <p class="modal-hint">اختر الحزب، ثم ابدأ اختبارًا جديدًا. سيعرض لك التطبيق بداية كل آية، وعليك إكمالها بصوتك من حفظك.</p>
+      <div class="quiz-picker-row">
+        <label for="hizbTestSelect" class="sr-only">اختر الحزب</label>
+        <select id="hizbTestSelect"></select>
+        <button id="hizbTestStartBtn" class="ctrl-btn primary" type="button">ابدأ اختبار جديد</button>
+      </div>
+      <p id="hizbTestCoverage" class="hizb-test-coverage"></p>
+    </div>
+
+    <!-- شاشة الأسئلة -->
+    <div id="hizbTestRun" class="hizb-test-run hidden">
+      <div class="hizb-test-progress">
+        <span id="hizbTestProgressText">السؤال 1 من 30</span>
+        <div class="hizb-test-progress-bar"><div id="hizbTestProgressFill" class="hizb-test-progress-fill"></div></div>
+      </div>
+      <div class="hizb-test-card">
+        <p class="hizb-test-meta" id="hizbTestQMeta">صفحة — / سورة —</p>
+        <p class="hizb-test-prefix" id="hizbTestPrefixText" dir="rtl">—</p>
+        <button id="hizbTestViewPageBtn" class="hizb-test-view-page-btn" type="button">👁 عرض هذه الصفحة من المصحف الأصلي</button>
+      </div>
+      <div class="control-row record-row">
+        <button id="hizbAnswerRecordBtn" class="ctrl-btn record-btn" type="button">
+          <span aria-hidden="true">🎙</span>
+          <span class="btn-text">ابدأ التسجيل</span>
+        </button>
+        <button id="hizbAnswerStopBtn" class="ctrl-btn hidden" type="button">
+          <span aria-hidden="true">⏹</span>
+          <span class="btn-text">إيقاف التسجيل</span>
+        </button>
+        <span id="hizbAnswerTimer" class="rec-timer hidden">0:00</span>
+      </div>
+      <div class="hizb-test-nav-row">
+        <button id="hizbTestSkipBtn" class="ctrl-btn" type="button">تخطّي هذا السؤال</button>
+        <button id="hizbTestNextBtn" class="ctrl-btn primary" type="button" disabled>السؤال التالي</button>
+      </div>
+      <button id="hizbTestEndEarlyBtn" class="hizb-test-end-early" type="button">إنهاء الاختبار الآن وعرض النتائج</button>
+    </div>
+
+    <!-- شاشة المراجعة (بدون تصحيح تلقائي) -->
+    <div id="hizbTestReview" class="hizb-test-review hidden">
+      <p class="modal-hint">استمع لكل إجابة وصحّح لنفسك بمقارنتها بصفحة المصحف — التطبيق لا يقيّم القراءة تلقائيًا.</p>
+      <div id="hizbTestReviewList" class="hizb-test-review-list"></div>
+      <button id="hizbTestNewAttemptBtn" class="ctrl-btn primary" type="button">اختبار جديد لهذا الحزب</button>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة تذكير المراجعة وحالة الحفظ -->
+<div id="reminderModal" class="modal hidden" role="dialog" aria-label="حالة الحفظ">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>حالة الحفظ</h2>
+      <button id="closeReminderModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <div class="modal-body" id="reminderBody">
+
+      <div class="hizb-status-dashboard">
+        <p class="modal-hint">حالة كل حزب مبنية تلقائيًا من تاريخ آخر تسجيل حزب كامل أو آخر إجابة في اختبار حفظ سجّلتها له فعليًا — بلا أي تقييم يدوي منك. <strong>ثابت</strong>: راجعته خلال آخر 14 يومًا. <strong>يحتاج مراجعة قريبًا</strong>: بين 15 و30 يومًا. <strong>يحتاج مراجعة</strong>: أكثر من 30 يومًا. <strong>لم يُسجَّل بعد</strong>: لا يوجد أي نشاط مسجَّل له إطلاقًا.</p>
+        <div class="status-summary-row" id="statusSummaryRow"></div>
+        <div class="status-grid" id="statusGrid"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- نافذة سجل التقدّم الصوتي -->
+<div id="progressLogModal" class="modal hidden" role="dialog" aria-label="سجل التقدّم الصوتي">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>سجل التقدّم</h2>
+      <button id="closeProgressLogModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <p class="modal-hint" id="progressLogTargetLabel">—</p>
+    <div class="modal-body" id="progressLogBody">
+      <div id="progressLogCompareRow" class="progress-log-compare-row hidden">
+        <button id="compareOldestNewestBtn" class="ctrl-btn primary" type="button">▶ قارن الأقدم بالأحدث</button>
+      </div>
+      <div id="progressLogList" class="progress-log-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- نافذة إحصائيات مواضع الأخطاء -->
+<div id="errorStatsModal" class="modal hidden" role="dialog" aria-label="إحصائيات مواضع الأخطاء">
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>إحصائيات مواضع الأخطاء</h2>
+      <button id="closeErrorStatsModal" class="modal-close" aria-label="إغلاق">×</button>
+    </div>
+    <p class="modal-hint">عدد العلامات الحالية في كل صفحة وضعتَ فيها علامة ولو مرة — راقب كيف ينخفض العدد مع مراجعاتك.</p>
+    <div class="modal-body" id="errorStatsBody">
+      <div id="errorStatsList" class="error-stats-list"></div>
+    </div>
   </div>
 </div>
 
 <script src="js/db.js"></script>
 <script src="js/surahs.js"></script>
 <script src="js/juz.js"></script>
+<script src="js/pages.js"></script>
+<script src="js/ahzab.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
