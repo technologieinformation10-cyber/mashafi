@@ -86,6 +86,10 @@
     recordRow: document.getElementById("recordRow"),
     recordBtn: document.getElementById("recordBtn"),
     recordBtnText: document.getElementById("recordBtnText"),
+    pauseResumeRecordBtn: document.getElementById("pauseResumeRecordBtn"),
+    pauseResumeBtnText: document.getElementById("pauseResumeBtnText"),
+    pauseBarsIcon: document.getElementById("pauseBarsIcon"),
+    resumeTriIcon: document.getElementById("resumeTriIcon"),
     stopRecordBtn: document.getElementById("stopRecordBtn"),
     recTimer: document.getElementById("recTimer"),
     surahRecordHint: document.getElementById("surahRecordHint"),
@@ -147,6 +151,9 @@
     hizbTestPrefixText: document.getElementById("hizbTestPrefixText"),
     hizbTestViewPageBtn: document.getElementById("hizbTestViewPageBtn"),
     hizbAnswerRecordBtn: document.getElementById("hizbAnswerRecordBtn"),
+    hizbAnswerPauseResumeBtn: document.getElementById("hizbAnswerPauseResumeBtn"),
+    hizbAnswerPauseIcon: document.getElementById("hizbAnswerPauseIcon"),
+    hizbAnswerResumeIcon: document.getElementById("hizbAnswerResumeIcon"),
     hizbAnswerStopBtn: document.getElementById("hizbAnswerStopBtn"),
     hizbAnswerTimer: document.getElementById("hizbAnswerTimer"),
     hizbTestSkipBtn: document.getElementById("hizbTestSkipBtn"),
@@ -187,6 +194,8 @@
     chunks: [],
     recordStartTime: 0,
     recordTimerHandle: null,
+    recordPausedAccum: 0, // إجمالي مدة الإيقاف المؤقت (مللي ثانية) — تُطرح من مدة التسجيل النهائية
+    recordPauseStartedAt: 0, // وقت بدء الإيقاف المؤقت الحالي، أو 0 إن كان التسجيل يعمل فعليًا
     stream: null,
 
     audio: new Audio(),
@@ -215,6 +224,7 @@
       answers: {}, // qid -> {blob, duration, mimeType}
     },
     testMediaRecorder: null, testChunks: [], testRecordStart: 0, testRecordTimerHandle: null, testStream: null,
+    testRecordPausedAccum: 0, testRecordPauseStartedAt: 0,
   };
 
   state.audio.preservesPitch = true;
@@ -227,6 +237,20 @@
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return m + ":" + String(s).padStart(2, "0");
+  }
+
+  // مسجّل "مشغول" أثناء التسجيل الفعلي أو أثناء إيقافه المؤقت — في الحالتين
+  // هناك تسجيل غير مكتمل يجب عدم فقدانه أو السماح بمقاطعته (تبديل وضع/إغلاق الصفحة...).
+  function isRecorderBusy(recorder) {
+    return !!recorder && (recorder.state === "recording" || recorder.state === "paused");
+  }
+
+  // الزمن الفعلي المسجَّل بالمللي ثانية: زمن الحائط منذ البداية ناقص كل فترات
+  // الإيقاف المؤقت (المكتملة + الجارية حاليًا إن كان متوقفًا الآن)، بحيث تطابق
+  // القيمة المعروضة والمحفوظة زمن الصوت الفعلي الذي التقطه MediaRecorder فقط.
+  function elapsedRecordingMs(startTime, pausedAccumMs, pauseStartedAt) {
+    const pausedSoFar = pausedAccumMs + (pauseStartedAt ? (Date.now() - pauseStartedAt) : 0);
+    return Math.max(0, Date.now() - startTime - pausedSoFar);
   }
 
   const ARABIC_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
@@ -816,52 +840,61 @@
 
     state.mediaRecorder.onstop = async () => {
       const blob = new Blob(state.chunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
-      const duration = (Date.now() - state.recordStartTime) / 1000;
+      const duration = elapsedRecordingMs(state.recordStartTime, state.recordPausedAccum, state.recordPauseStartedAt) / 1000;
 
-      // نجلب سجل النسخ السابقة قبل إضافة هذه النسخة، لمقارنة مدة هذا التسجيل بمعتادها
-      let priorHistory = [];
-      try { priorHistory = await QuranDB.getHistoryForTarget(target.type, target.id); } catch (e) { /* تجاهل */ }
-
-      if (target.type === "surah") {
-        await QuranDB.saveSurahRecording(target.id, blob, duration);
-      } else if (target.type === "hizb") {
-        const hizb = hizbByNumber(target.id);
-        await QuranDB.saveHizbRecording(target.id, blob, duration, hizb ? {
-          hizbName: hizb.name, startSurahName: hizb.startSurahName, endSurahName: hizb.endSurahName,
-          startPage: hizb.startPage, endPage: hizb.endPage,
-        } : null);
-      } else {
-        await QuranDB.saveRecording(target.id, blob, duration);
-      }
-
-      // سجل التقدّم: يُضاف كنسخة جديدة، لا يستبدل أي شيء — لا يؤثر على الحفظ أعلاه إن فشل
       try {
-        await QuranDB.saveHistoryEntry({ type: target.type, targetId: target.id, blob, duration, label: targetLabel(target.type, target.id) });
-      } catch (e) { /* تجاهل — الحفظ الأساسي أهم ونجح فعلاً */ }
+        // نجلب سجل النسخ السابقة قبل إضافة هذه النسخة، لمقارنة مدة هذا التسجيل بمعتادها
+        let priorHistory = [];
+        try { priorHistory = await QuranDB.getHistoryForTarget(target.type, target.id); } catch (e) { /* تجاهل */ }
 
-      const anomaly = computeDurationAnomaly(priorHistory, duration);
-      if (anomaly.isAnomaly) {
-        showToast(`⚠️ هذا التسجيل أطول من المعتاد (${formatTime(duration)} مقابل ${formatTime(anomaly.avgDuration)} عادة) — راجعه في «سجل التقدّم»`);
-      } else if (target.type === "surah") {
-        showToast("تم حفظ تسجيل السورة كاملة");
-      } else if (target.type === "hizb") {
-        showToast("تم حفظ تسجيل الحزب كاملاً");
-      } else {
-        showToast("تم حفظ التسجيل");
+        if (target.type === "surah") {
+          await QuranDB.saveSurahRecording(target.id, blob, duration);
+        } else if (target.type === "hizb") {
+          const hizb = hizbByNumber(target.id);
+          await QuranDB.saveHizbRecording(target.id, blob, duration, hizb ? {
+            hizbName: hizb.name, startSurahName: hizb.startSurahName, endSurahName: hizb.endSurahName,
+            startPage: hizb.startPage, endPage: hizb.endPage,
+          } : null);
+        } else {
+          await QuranDB.saveRecording(target.id, blob, duration);
+        }
+
+        // سجل التقدّم: يُضاف كنسخة جديدة، لا يستبدل أي شيء — لا يؤثر على الحفظ أعلاه إن فشل
+        try {
+          await QuranDB.saveHistoryEntry({ type: target.type, targetId: target.id, blob, duration, label: targetLabel(target.type, target.id) });
+        } catch (e) { /* تجاهل — الحفظ الأساسي أهم ونجح فعلاً */ }
+
+        const anomaly = computeDurationAnomaly(priorHistory, duration);
+        if (anomaly.isAnomaly) {
+          showToast(`⚠️ هذا التسجيل أطول من المعتاد (${formatTime(duration)} مقابل ${formatTime(anomaly.avgDuration)} عادة) — راجعه في «سجل التقدّم»`);
+        } else if (target.type === "surah") {
+          showToast("تم حفظ تسجيل السورة كاملة");
+        } else if (target.type === "hizb") {
+          showToast("تم حفظ تسجيل الحزب كاملاً");
+        } else {
+          showToast("تم حفظ التسجيل");
+        }
+      } catch (err) {
+        console.error("فشل حفظ التسجيل:", err);
+        showToast("تعذّر حفظ التسجيل: " + (err && err.message ? err.message : "خطأ غير معروف"));
+      } finally {
+        state.stream && state.stream.getTracks().forEach((t) => t.stop());
+        state.stream = null;
+        if (target.type === "surah") loadSurah(target.id);
+        else if (target.type === "hizb") loadHizb(target.id);
+        else loadPage(target.id);
       }
-
-      state.stream.getTracks().forEach((t) => t.stop());
-      state.stream = null;
-      if (target.type === "surah") loadSurah(target.id);
-      else if (target.type === "hizb") loadHizb(target.id);
-      else loadPage(target.id);
     };
 
     state.mediaRecorder.start();
     state.recordStartTime = Date.now();
+    state.recordPausedAccum = 0;
+    state.recordPauseStartedAt = 0;
 
     el.recordBtn.classList.add("hidden");
     el.stopRecordBtn.classList.remove("hidden");
+    el.pauseResumeRecordBtn.classList.remove("hidden");
+    applyRecordPauseUI(false);
     el.recTimer.classList.remove("hidden");
     el.playBtn.disabled = true;
     el.deleteBtn.disabled = true;
@@ -873,24 +906,63 @@
     el.pageInput.disabled = true;
     el.playlistBtn.disabled = true;
 
+    requestWakeLock(); // إبقاء الشاشة مضاءة تحديدًا أثناء التسجيل (طلب إضافي احترازي فوق الطلب العام)
+    notifyWakeLockUnsupportedIfNeeded();
+
     state.recordTimerHandle = setInterval(() => {
-      const elapsed = (Date.now() - state.recordStartTime) / 1000;
+      const elapsed = elapsedRecordingMs(state.recordStartTime, state.recordPausedAccum, state.recordPauseStartedAt) / 1000;
       el.recTimer.textContent = formatTime(elapsed);
     }, 200);
   }
 
+  // تبديل بين إيقاف مؤقت واستكمال لتسجيل الصفحة/السورة/الحزب —
+  // يعتمد على pause()/resume() الأصليتين في MediaRecorder، فلا يُسجَّل أي صوت
+  // أثناء الإيقاف المؤقت (يُستبعد تمامًا من الملف النهائي، وليس مجرد صمت داخله).
+  function applyRecordPauseUI(isPaused) {
+    el.pauseResumeRecordBtn.classList.toggle("is-paused", isPaused);
+    el.pauseResumeRecordBtn.setAttribute("aria-pressed", isPaused ? "true" : "false");
+    el.pauseResumeRecordBtn.setAttribute("aria-label", isPaused ? "استئناف التسجيل" : "إيقاف مؤقت للتسجيل");
+    el.pauseBarsIcon.classList.toggle("hidden", isPaused);
+    el.resumeTriIcon.classList.toggle("hidden", !isPaused);
+    el.pauseResumeBtnText.textContent = isPaused ? "استئناف" : "إيقاف مؤقت";
+    el.recTimer.classList.toggle("paused", isPaused);
+  }
+
+  function togglePauseResumeRecording() {
+    const rec = state.mediaRecorder;
+    if (!rec) return;
+    if (rec.state === "recording") {
+      try { rec.pause(); } catch (e) { showToast("تعذّر الإيقاف المؤقت للتسجيل"); return; }
+      state.recordPauseStartedAt = Date.now();
+      applyRecordPauseUI(true);
+    } else if (rec.state === "paused") {
+      try { rec.resume(); } catch (e) { showToast("تعذّر استئناف التسجيل"); return; }
+      state.recordPausedAccum += Date.now() - state.recordPauseStartedAt;
+      state.recordPauseStartedAt = 0;
+      applyRecordPauseUI(false);
+    }
+  }
+
   function stopRecordingIfActive(silent) {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isRecorderBusy(state.mediaRecorder)) {
       if (silent) {
         state.mediaRecorder.onstop = () => {
           state.stream && state.stream.getTracks().forEach((t) => t.stop());
         };
       }
-      state.mediaRecorder.stop();
+      try {
+        state.mediaRecorder.stop();
+      } catch (e) {
+        showToast("تعذّر إيقاف التسجيل بشكل طبيعي — أعد تحميل الصفحة إن استمرت المشكلة");
+        state.stream && state.stream.getTracks().forEach((t) => t.stop());
+        state.stream = null;
+      }
     }
     clearInterval(state.recordTimerHandle);
     el.recordBtn.classList.remove("hidden");
     el.stopRecordBtn.classList.add("hidden");
+    el.pauseResumeRecordBtn.classList.add("hidden");
+    applyRecordPauseUI(false);
     el.recTimer.classList.add("hidden");
     el.modePageBtn.disabled = false;
     el.modeSurahBtn.disabled = false;
@@ -1455,6 +1527,8 @@
     el.hizbTestQMeta.textContent = questionMetaText(q);
     el.hizbTestPrefixText.textContent = q.prefix;
     el.hizbAnswerRecordBtn.classList.remove("hidden");
+    el.hizbAnswerPauseResumeBtn.classList.add("hidden");
+    applyHizbAnswerPauseUI(false);
     el.hizbAnswerStopBtn.classList.add("hidden");
     el.hizbAnswerTimer.classList.add("hidden");
     el.hizbAnswerTimer.textContent = "0:00";
@@ -1484,31 +1558,79 @@
     }
     state.testMediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) state.testChunks.push(e.data); };
     state.testMediaRecorder.onstop = () => {
-      const blob = new Blob(state.testChunks, { type: state.testMediaRecorder.mimeType || "audio/webm" });
-      const duration = (Date.now() - state.testRecordStart) / 1000;
-      const t = state.hizbTest;
-      const q = t.questions[t.index];
-      if (q) t.answers[q.qid] = { blob, duration, mimeType: blob.type };
-      state.testStream && state.testStream.getTracks().forEach((tr) => tr.stop());
-      state.testStream = null;
-      renderHizbTestQuestion();
+      try {
+        const blob = new Blob(state.testChunks, { type: state.testMediaRecorder.mimeType || "audio/webm" });
+        const duration = elapsedRecordingMs(state.testRecordStart, state.testRecordPausedAccum, state.testRecordPauseStartedAt) / 1000;
+        const t = state.hizbTest;
+        const q = t.questions[t.index];
+        if (q) t.answers[q.qid] = { blob, duration, mimeType: blob.type };
+      } catch (err) {
+        console.error("فشل حفظ إجابة الاختبار:", err);
+        showToast("تعذّر حفظ الإجابة: " + (err && err.message ? err.message : "خطأ غير معروف"));
+      } finally {
+        state.testStream && state.testStream.getTracks().forEach((tr) => tr.stop());
+        state.testStream = null;
+        renderHizbTestQuestion();
+      }
     };
     state.testMediaRecorder.start();
     state.testRecordStart = Date.now();
+    state.testRecordPausedAccum = 0;
+    state.testRecordPauseStartedAt = 0;
     el.hizbAnswerRecordBtn.classList.add("hidden");
+    el.hizbAnswerPauseResumeBtn.classList.remove("hidden");
+    applyHizbAnswerPauseUI(false);
     el.hizbAnswerStopBtn.classList.remove("hidden");
     el.hizbAnswerTimer.classList.remove("hidden");
     el.hizbTestSkipBtn.disabled = true;
+
+    requestWakeLock(); // إبقاء الشاشة مضاءة تحديدًا أثناء تسجيل إجابة الاختبار
+    notifyWakeLockUnsupportedIfNeeded();
+
     state.testRecordTimerHandle = setInterval(() => {
-      el.hizbAnswerTimer.textContent = formatTime((Date.now() - state.testRecordStart) / 1000);
+      const elapsed = elapsedRecordingMs(state.testRecordStart, state.testRecordPausedAccum, state.testRecordPauseStartedAt) / 1000;
+      el.hizbAnswerTimer.textContent = formatTime(elapsed);
     }, 200);
   }
 
+  // تبديل إيقاف مؤقت/استكمال لتسجيل إجابة اختبار الحفظ — نفس مبدأ تسجيل الصفحة/السورة/الحزب
+  function applyHizbAnswerPauseUI(isPaused) {
+    el.hizbAnswerPauseResumeBtn.classList.toggle("is-paused", isPaused);
+    el.hizbAnswerPauseResumeBtn.setAttribute("aria-pressed", isPaused ? "true" : "false");
+    el.hizbAnswerPauseIcon.classList.toggle("hidden", isPaused);
+    el.hizbAnswerResumeIcon.classList.toggle("hidden", !isPaused);
+    el.hizbAnswerPauseResumeBtn.querySelector(".btn-text").textContent = isPaused ? "استئناف" : "إيقاف مؤقت";
+    el.hizbAnswerTimer.classList.toggle("paused", isPaused);
+  }
+
+  function toggleHizbAnswerPauseResume() {
+    const rec = state.testMediaRecorder;
+    if (!rec) return;
+    if (rec.state === "recording") {
+      try { rec.pause(); } catch (e) { showToast("تعذّر الإيقاف المؤقت للتسجيل"); return; }
+      state.testRecordPauseStartedAt = Date.now();
+      applyHizbAnswerPauseUI(true);
+    } else if (rec.state === "paused") {
+      try { rec.resume(); } catch (e) { showToast("تعذّر استئناف التسجيل"); return; }
+      state.testRecordPausedAccum += Date.now() - state.testRecordPauseStartedAt;
+      state.testRecordPauseStartedAt = 0;
+      applyHizbAnswerPauseUI(false);
+    }
+  }
+
   function stopHizbAnswerRecording() {
-    if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
-      state.testMediaRecorder.stop();
+    if (isRecorderBusy(state.testMediaRecorder)) {
+      try {
+        state.testMediaRecorder.stop();
+      } catch (e) {
+        showToast("تعذّر إيقاف التسجيل بشكل طبيعي");
+        state.testStream && state.testStream.getTracks().forEach((t) => t.stop());
+        state.testStream = null;
+      }
     }
     clearInterval(state.testRecordTimerHandle);
+    el.hizbAnswerPauseResumeBtn.classList.add("hidden");
+    applyHizbAnswerPauseUI(false);
     el.hizbTestSkipBtn.disabled = false;
   }
 
@@ -1640,13 +1762,20 @@
   }
 
   function stopHizbTestRecordingIfActive() {
-    if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
+    if (isRecorderBusy(state.testMediaRecorder)) {
       state.testMediaRecorder.onstop = () => {
         state.testStream && state.testStream.getTracks().forEach((t) => t.stop());
       };
-      state.testMediaRecorder.stop();
+      try {
+        state.testMediaRecorder.stop();
+      } catch (e) {
+        state.testStream && state.testStream.getTracks().forEach((t) => t.stop());
+        state.testStream = null;
+      }
     }
     clearInterval(state.testRecordTimerHandle);
+    state.testRecordPausedAccum = 0;
+    state.testRecordPauseStartedAt = 0;
   }
 
   function openHizbTestModal() {
@@ -2089,7 +2218,7 @@
 
   // ===== ربط الأحداث: التبديل بين الأوضاع =====
   el.modePageBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isRecorderBusy(state.mediaRecorder)) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2099,7 +2228,7 @@
   });
 
   el.modeSurahBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isRecorderBusy(state.mediaRecorder)) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2110,7 +2239,7 @@
   });
 
   el.modeHizbBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isRecorderBusy(state.mediaRecorder)) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2148,6 +2277,7 @@
   });
 
   el.recordBtn.addEventListener("click", startRecording);
+  el.pauseResumeRecordBtn.addEventListener("click", togglePauseResumeRecording);
   el.stopRecordBtn.addEventListener("click", stopRecording);
 
   el.deleteBtn.addEventListener("click", async () => {
@@ -2292,6 +2422,7 @@
   el.hizbTestSelect.addEventListener("change", updateHizbTestCoverage);
   el.hizbTestStartBtn.addEventListener("click", startHizbTestAttempt);
   el.hizbAnswerRecordBtn.addEventListener("click", startHizbAnswerRecording);
+  el.hizbAnswerPauseResumeBtn.addEventListener("click", toggleHizbAnswerPauseResume);
   el.hizbAnswerStopBtn.addEventListener("click", stopHizbAnswerRecording);
   el.hizbTestNextBtn.addEventListener("click", goToNextHizbTestQuestion);
   el.hizbTestSkipBtn.addEventListener("click", skipHizbTestQuestion);
@@ -2333,15 +2464,45 @@
     }
   });
 
-  // منع فقدان تسجيل جارٍ عند إغلاق الصفحة
+  // منع فقدان تسجيل جارٍ (بما في ذلك تسجيل متوقف مؤقتًا) عند إغلاق الصفحة
   window.addEventListener("beforeunload", (e) => {
-    const recording = (state.mediaRecorder && state.mediaRecorder.state === "recording") ||
-      (state.testMediaRecorder && state.testMediaRecorder.state === "recording");
+    const recording = isRecorderBusy(state.mediaRecorder) || isRecorderBusy(state.testMediaRecorder);
     if (recording) {
       e.preventDefault();
       e.returnValue = "";
     }
   });
+
+  // ===== إبقاء الشاشة مضاءة أثناء استخدام التطبيق (Wake Lock) =====
+  // يمنع القفل التلقائي للشاشة طالما التطبيق مفتوحًا وظاهرًا أمام المستخدم —
+  // مهم خصوصًا أثناء تسجيل صفحة/سورة/حزب كامل أو إجابة اختبار الحفظ، حتى لا
+  // ينقطع التركيز أو يحتاج المستخدم للمس الشاشة باستمرار أثناء التسميع.
+  // متصفحات لا تدعم الميزة (Wake Lock API) تستمر بالعمل كالمعتاد بدون أي تغيير.
+  let wakeLock = null;
+  let wakeLockUnsupportedNoticeShown = false;
+
+  async function requestWakeLock() {
+    if (!("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (err) {
+      wakeLock = null; // فشل الطلب (توفير طاقة مثلاً) — تجاهل بصمت
+    }
+  }
+
+  // تنبيه لطيف مرة واحدة فقط إن كان المتصفح لا يدعم إبقاء الشاشة مضاءة تلقائيًا،
+  // يظهر فقط عند بدء تسجيل فعلي (السياق الأهم) لا عند فتح التطبيق مباشرة.
+  function notifyWakeLockUnsupportedIfNeeded() {
+    if (wakeLockUnsupportedNoticeShown || "wakeLock" in navigator) return;
+    wakeLockUnsupportedNoticeShown = true;
+    showToast("تنبيه: متصفحك لا يدعم إبقاء الشاشة مضاءة تلقائيًا أثناء التسجيلات الطويلة");
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") requestWakeLock();
+  });
+  requestWakeLock();
 
   // ===== تسجيل Service Worker للعمل بدون إنترنت =====
   if ("serviceWorker" in navigator) {
