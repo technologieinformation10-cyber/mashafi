@@ -18,6 +18,7 @@
   const TOTAL_PAGES = 604;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 62; // نفس نصف قطر دائرة الـ SVG
   const QUESTIONS_PER_ATTEMPT = 30;
+  const PAGE_TRANSITION_MS = 120; // مدة كل شطر من انتقال تقليب الصفحة (خروج/دخول) — تُلغى تلقائيًا مع إعداد "تقليل الحركة"
 
   // أي خطأ غير متوقّع (بما فيه أخطاء لم تُتوقَّع أثناء الكتابة) يظهر كرسالة قصيرة
   // بدل أن يفشل الزر بصمت دون أي إشارة لسبب المشكلة — يسهّل هذا اكتشاف أي عطل
@@ -86,6 +87,10 @@
     recordRow: document.getElementById("recordRow"),
     recordBtn: document.getElementById("recordBtn"),
     recordBtnText: document.getElementById("recordBtnText"),
+    pauseRecordBtn: document.getElementById("pauseRecordBtn"),
+    pauseRecordIcon: document.getElementById("pauseRecordIcon"),
+    pauseRecordBtnText: document.getElementById("pauseRecordBtnText"),
+    recPausedBadge: document.getElementById("recPausedBadge"),
     stopRecordBtn: document.getElementById("stopRecordBtn"),
     recTimer: document.getElementById("recTimer"),
     surahRecordHint: document.getElementById("surahRecordHint"),
@@ -186,6 +191,8 @@
     mediaRecorder: null,
     chunks: [],
     recordStartTime: 0,
+    recordElapsedBeforePause: 0, // مجموع ثواني التسجيل الفعلية المتراكمة من مقاطع سابقة قبل أي إيقاف مؤقت حالي
+    recordFinalDuration: 0, // يُحسب لحظة الإيقاف النهائي (قبل أن تصبح حالة المسجّل غير نشطة) ليُستخدم عند الحفظ
     recordTimerHandle: null,
     stream: null,
 
@@ -241,24 +248,57 @@
     return `page-${pageNum}.jpg`;
   }
 
-  function loadPageImage(pageNum) {
+  // انتقال بصري سلس بين صورتي صفحة متتاليتين (تأثير بصري بحت — لا يمسّ الصوت أو التسجيل إطلاقًا).
+  // يعمل بتبديل صنفَي CSS فقط (بلا مضاعفة عناصر DOM)، ويُلغى تلقائيًا مع إعداد "تقليل الحركة" في النظام.
+  let pageTransitionTimer = null;
+  function runPageTransition(direction, applyFn) {
+    const img = el.pageImage;
+    if (pageTransitionTimer) { clearTimeout(pageTransitionTimer); pageTransitionTimer = null; }
+    img.classList.remove("pg-shift-left", "pg-shift-right");
+    const exitClass = direction === "next" ? "pg-shift-left" : "pg-shift-right";
+    const enterClass = direction === "next" ? "pg-shift-right" : "pg-shift-left";
+    void img.offsetWidth; // إجبار إعادة رسم فورية حتى تبدأ حركة الخروج من نقطة الصفر في كل مرة
+    img.classList.add(exitClass);
+    pageTransitionTimer = window.setTimeout(() => {
+      pageTransitionTimer = null;
+      img.classList.remove(exitClass);
+      applyFn();
+      img.classList.add(enterClass);
+      void img.offsetWidth;
+      img.classList.remove(enterClass);
+      window.setTimeout(() => mainMarkController.reposition(), PAGE_TRANSITION_MS + 20);
+    }, PAGE_TRANSITION_MS);
+  }
+
+  // pageNum: رقم الصفحة المطلوب عرضها.
+  // direction: اختياري — "next" أو "prev". يُمرَّر فقط عند التنقّل (أزرار/سحب) لتفعيل
+  // انتقال سلس؛ عند تركه فارغًا (كل الاستدعاءات الحالية عند فتح صفحة/سورة/حزب لأول مرة)
+  // يبقى السلوك تبديلاً فوريًا كما كان تمامًا دون أي تغيير.
+  function loadPageImage(pageNum, direction) {
     const src = pageImageSrc(pageNum);
     const tester = new Image();
-    tester.onload = () => {
+    const showImage = () => {
       if (state.currentPage !== pageNum) return;
       el.pageImage.src = src;
       el.pageImage.classList.remove("hidden");
       el.pageImagePlaceholder.classList.add("hidden");
       el.pageImageWrap.classList.add("has-image");
-      repositionAllMarks();
+      mainMarkController.reposition();
     };
-    tester.onerror = () => {
+    const showMissing = () => {
       if (state.currentPage !== pageNum) return;
       el.pageImage.classList.add("hidden");
       el.pageImage.removeAttribute("src");
       el.pageImagePlaceholder.classList.remove("hidden");
       el.pageImageWrap.classList.remove("has-image");
     };
+    if (direction) {
+      tester.onload = () => runPageTransition(direction, showImage);
+      tester.onerror = () => runPageTransition(direction, showMissing);
+    } else {
+      tester.onload = showImage;
+      tester.onerror = showMissing;
+    }
     tester.src = src;
     loadErrorMarksForPage(pageNum);
   }
@@ -655,7 +695,9 @@
   }
 
   // ===== تحميل صفحة (وضع الصفحة) =====
-  async function loadPage(pageNum) {
+  // direction: اختياري — يُمرَّر فقط عند التنقّل بالأزرار/السحب بين صفحات مستقلة لتفعيل
+  // انتقال سلس بصريًا؛ لا يغيّر أي شيء في منطق تحميل التسجيل أو حالة التشغيل.
+  async function loadPage(pageNum, direction) {
     pageNum = Math.max(1, Math.min(TOTAL_PAGES, pageNum));
     stopQueueIfActive();
     stopPlayback();
@@ -672,7 +714,7 @@
 
     try { localStorage.setItem("quran-last-page", String(pageNum)); } catch (e) { /* تجاهل */ }
 
-    loadPageImage(pageNum);
+    loadPageImage(pageNum, direction);
 
     const rec = await QuranDB.getRecording(pageNum);
     await setAudioFromRecord(rec);
@@ -763,7 +805,7 @@
     if (target < state.currentSurah.startPage || target > state.currentSurah.endPage) return;
     state.currentPage = target;
     el.pageNumberLabel.textContent = `سورة ${state.currentSurah.name} — صفحة ${target}`;
-    loadPageImage(target);
+    loadPageImage(target, delta > 0 ? "next" : "prev");
   }
 
   function flipHizbPage(delta) {
@@ -772,10 +814,129 @@
     if (target < state.currentHizb.startPage || target > state.currentHizb.endPage) return;
     state.currentPage = target;
     el.pageNumberLabel.textContent = `${state.currentHizb.name} — صفحة ${target}`;
-    loadPageImage(target);
+    loadPageImage(target, delta > 0 ? "next" : "prev");
   }
 
+  // نقطة تنقّل واحدة مشتركة بين أزرار السابق/التالي وسحبة الإصبع، حتى يبقى سلوكهما متطابقًا
+  // تمامًا دائمًا: في وضع السورة/الحزب لا تُلمَس حالة الصوت إطلاقًا (تقليب صورة فقط)،
+  // وفي وضع الصفحة تُحمَّل صفحة مستقلة بتسجيلها الخاص (نفس سلوك الأزرار الأصلي).
+  function goToAdjacentPage(delta) {
+    if (state.queue) return; // لقائمة الاستماع أزرار تنقّل خاصة بها منفصلة تمامًا عن هذه
+    if (state.mode === "surah") flipSurahPage(delta);
+    else if (state.mode === "hizb") flipHizbPage(delta);
+    else loadPage(state.currentPage + delta, delta > 0 ? "next" : "prev");
+  }
+
+  // ===== إبقاء الشاشة مضاءة أثناء التسجيل (Wake Lock) =====
+  // يعتمد على Screen Wake Lock API القياسي (مدعوم على Android/Chrome وأغلب المتصفحات
+  // الحديثة، بما فيها PWA المثبَّتة). عند عدم توفّره، يتحوّل تلقائيًا لبديل عملي:
+  // فيديو صامت غير مرئي (1×1) يعمل في حلقة مستمرة — وهي طريقة معروفة تمنع بعض
+  // المتصفحات/الأجهزة الأقدم من إطفاء الشاشة تلقائيًا أثناء تشغيل فيديو.
+  // يدعم عدّة "أصحاب" في آن واحد (تسجيل صفحة/سورة/حزب + تسجيل إجابة اختبار الحفظ)
+  // بحيث لا يُحرَّر القفل فعليًا إلا بعد توقف كل عمليات التسجيل الجارية.
+  const WakeLockCtl = (() => {
+    const isSupported = "wakeLock" in navigator;
+    let sentinel = null;
+    let fallbackVideo = null;
+    const owners = new Set();
+
+    function createFallbackVideo() {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.defaultMuted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.setAttribute("playsinline", "");
+      v.setAttribute("webkit-playsinline", "");
+      v.setAttribute("aria-hidden", "true");
+      v.tabIndex = -1;
+      Object.assign(v.style, {
+        position: "fixed", left: "-9999px", top: "0",
+        width: "1px", height: "1px", opacity: "0", pointerEvents: "none",
+      });
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 2;
+        canvas.height = 2;
+        const ctx = canvas.getContext("2d");
+        if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 2, 2); }
+        if (canvas.captureStream) v.srcObject = canvas.captureStream(2);
+      } catch (e) { /* تجاهل — سيبقى العنصر بلا مصدر فقط إن فشل هذا */ }
+      document.body.appendChild(v);
+      return v;
+    }
+
+    async function engageFallback() {
+      if (fallbackVideo) return;
+      fallbackVideo = createFallbackVideo();
+      try { await fallbackVideo.play(); } catch (e) { /* أفضل محاولة ممكنة فقط — لا يوجد بديل أقوى */ }
+    }
+
+    function disposeFallback() {
+      if (!fallbackVideo) return;
+      try { fallbackVideo.pause(); } catch (e) { /* تجاهل */ }
+      try { fallbackVideo.remove(); } catch (e) { /* تجاهل */ }
+      fallbackVideo = null;
+    }
+
+    async function engage() {
+      if (owners.size === 0 || sentinel) return;
+      let ok = false;
+      if (isSupported) {
+        try {
+          sentinel = await navigator.wakeLock.request("screen");
+          sentinel.addEventListener("release", () => { sentinel = null; });
+          ok = true;
+        } catch (e) {
+          sentinel = null; // فشل الطلب (دعم جزئي/سياسة متصفح) — ننتقل للبديل بالأسفل
+        }
+      }
+      if (ok) disposeFallback();
+      else await engageFallback();
+    }
+
+    async function disengage() {
+      if (sentinel) {
+        try { await sentinel.release(); } catch (e) { /* تجاهل */ }
+        sentinel = null;
+      }
+      disposeFallback();
+    }
+
+    async function acquire(ownerKey) {
+      owners.add(ownerKey);
+      await engage();
+    }
+
+    async function release(ownerKey) {
+      owners.delete(ownerKey);
+      if (owners.size === 0) await disengage();
+    }
+
+    // المتصفح يُحرِّر القفل تلقائيًا كلما اختفت الصفحة (تبديل تطبيق آخر / قفل الهاتف يدويًا) —
+    // إن عاد المستخدم للتطبيق وتسجيل ما زال جاريًا فعليًا، نعيد تفعيل القفل فورًا تلقائيًا.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && owners.size > 0) engage();
+    });
+
+    return { acquire, release };
+  })();
+
   // ===== التسجيل (صفحة/سورة/حزب) =====
+
+  // جلسة التسجيل تُعتبر "نشطة" سواء كانت تُسجِّل فعليًا الآن أو متوقفة مؤقتًا (لم تُنهَ بعد)
+  function isMainRecordingActive() {
+    return !!(state.mediaRecorder && (state.mediaRecorder.state === "recording" || state.mediaRecorder.state === "paused"));
+  }
+
+  // إجمالي الثواني المسجَّلة فعليًا حتى الآن في الجلسة الحالية (يجمع كل المقاطع بين الإيقافات
+  // المؤقتة). أثناء الإيقاف المؤقت تبقى القيمة ثابتة تلقائيًا (لا يُضاف زمن الانتظار).
+  function currentRecordedSeconds() {
+    if (!state.mediaRecorder) return 0;
+    if (state.mediaRecorder.state === "paused") return state.recordElapsedBeforePause;
+    return state.recordElapsedBeforePause + (Date.now() - state.recordStartTime) / 1000;
+  }
+
   async function startRecording() {
     if (state.isPlaying) stopPlayback();
     if (state.queue) return; // لا تسجيل أثناء قائمة استماع نشطة
@@ -816,7 +977,7 @@
 
     state.mediaRecorder.onstop = async () => {
       const blob = new Blob(state.chunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
-      const duration = (Date.now() - state.recordStartTime) / 1000;
+      const duration = state.recordFinalDuration;
 
       // نجلب سجل النسخ السابقة قبل إضافة هذه النسخة، لمقارنة مدة هذا التسجيل بمعتادها
       let priorHistory = [];
@@ -859,8 +1020,12 @@
 
     state.mediaRecorder.start();
     state.recordStartTime = Date.now();
+    state.recordElapsedBeforePause = 0; // بداية جلسة تسجيل جديدة: لا وقت متراكم من إيقافات مؤقتة بعد
+    WakeLockCtl.acquire("mainRecording"); // إبقاء الشاشة مضاءة طوال مدة التسجيل (يبقى مفعَّلاً أثناء أي إيقاف مؤقت أيضًا)
 
     el.recordBtn.classList.add("hidden");
+    el.pauseRecordBtn.classList.remove("hidden");
+    setPauseButtonUI(false);
     el.stopRecordBtn.classList.remove("hidden");
     el.recTimer.classList.remove("hidden");
     el.playBtn.disabled = true;
@@ -874,13 +1039,13 @@
     el.playlistBtn.disabled = true;
 
     state.recordTimerHandle = setInterval(() => {
-      const elapsed = (Date.now() - state.recordStartTime) / 1000;
-      el.recTimer.textContent = formatTime(elapsed);
+      el.recTimer.textContent = formatTime(currentRecordedSeconds());
     }, 200);
   }
 
   function stopRecordingIfActive(silent) {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
+      state.recordFinalDuration = currentRecordedSeconds(); // يُحسب الآن، قبل أن تصبح حالة المسجّل "inactive"
       if (silent) {
         state.mediaRecorder.onstop = () => {
           state.stream && state.stream.getTracks().forEach((t) => t.stop());
@@ -888,8 +1053,11 @@
       }
       state.mediaRecorder.stop();
     }
+    WakeLockCtl.release("mainRecording"); // يُحرَّر تلقائيًا فقط بعد توقف كل عمليات التسجيل الجارية
     clearInterval(state.recordTimerHandle);
     el.recordBtn.classList.remove("hidden");
+    el.pauseRecordBtn.classList.add("hidden");
+    setPauseButtonUI(false);
     el.stopRecordBtn.classList.add("hidden");
     el.recTimer.classList.add("hidden");
     el.modePageBtn.disabled = false;
@@ -903,6 +1071,42 @@
 
   function stopRecording() {
     stopRecordingIfActive(false);
+  }
+
+  // إيقاف مؤقت للتسجيل الجاري: يحفظ الزمن المسجَّل حتى الآن، ثم يوقف المسجّل مؤقتًا
+  // (MediaRecorder.pause) دون إنهاء الجلسة — يبقى كل شيء (الهدف، الشريحة، الميكروفون،
+  // Wake Lock) كما هو تمامًا استعدادًا للاستئناف.
+  function pauseRecording() {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== "recording") return;
+    if (typeof state.mediaRecorder.pause !== "function") {
+      showToast("متصفحك لا يدعم الإيقاف المؤقت للتسجيل");
+      return;
+    }
+    state.recordElapsedBeforePause = currentRecordedSeconds();
+    state.mediaRecorder.pause();
+    setPauseButtonUI(true);
+  }
+
+  // استئناف تسجيل متوقف مؤقتًا: يبدأ مقطعًا جديدًا يُضاف فوق ما تراكم من قبل، فينتج في
+  // النهاية ملف صوتي واحد متصل بلا أي فجوة مسموعة لمدة التوقف نفسها.
+  function resumeRecording() {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== "paused") return;
+    state.recordStartTime = Date.now();
+    state.mediaRecorder.resume();
+    setPauseButtonUI(false);
+  }
+
+  function togglePauseRecording() {
+    if (!state.mediaRecorder) return;
+    if (state.mediaRecorder.state === "recording") pauseRecording();
+    else if (state.mediaRecorder.state === "paused") resumeRecording();
+  }
+
+  function setPauseButtonUI(paused) {
+    el.pauseRecordIcon.classList.toggle("is-resume", paused);
+    el.pauseRecordBtnText.textContent = paused ? "استئناف التسجيل" : "إيقاف مؤقت";
+    el.pauseRecordBtn.setAttribute("aria-label", paused ? "استئناف التسجيل" : "إيقاف التسجيل مؤقتًا");
+    el.recPausedBadge.classList.toggle("hidden", !paused);
   }
 
   // ===== التشغيل =====
@@ -1495,6 +1699,7 @@
     };
     state.testMediaRecorder.start();
     state.testRecordStart = Date.now();
+    WakeLockCtl.acquire("hizbTestRecording"); // إبقاء الشاشة مضاءة أثناء تسجيل إجابة الاختبار أيضًا
     el.hizbAnswerRecordBtn.classList.add("hidden");
     el.hizbAnswerStopBtn.classList.remove("hidden");
     el.hizbAnswerTimer.classList.remove("hidden");
@@ -1508,6 +1713,7 @@
     if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
       state.testMediaRecorder.stop();
     }
+    WakeLockCtl.release("hizbTestRecording");
     clearInterval(state.testRecordTimerHandle);
     el.hizbTestSkipBtn.disabled = false;
   }
@@ -1646,6 +1852,7 @@
       };
       state.testMediaRecorder.stop();
     }
+    WakeLockCtl.release("hizbTestRecording");
     clearInterval(state.testRecordTimerHandle);
   }
 
@@ -2089,7 +2296,7 @@
 
   // ===== ربط الأحداث: التبديل بين الأوضاع =====
   el.modePageBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2099,7 +2306,7 @@
   });
 
   el.modeSurahBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2110,7 +2317,7 @@
   });
 
   el.modeHizbBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2148,6 +2355,7 @@
   });
 
   el.recordBtn.addEventListener("click", startRecording);
+  el.pauseRecordBtn.addEventListener("click", togglePauseRecording);
   el.stopRecordBtn.addEventListener("click", stopRecording);
 
   el.deleteBtn.addEventListener("click", async () => {
@@ -2181,16 +2389,88 @@
   });
 
   // ===== ربط الأحداث: التنقل بين الصفحات =====
-  el.prevPage.addEventListener("click", () => {
-    if (state.mode === "surah") flipSurahPage(-1);
-    else if (state.mode === "hizb") flipHizbPage(-1);
-    else loadPage(state.currentPage - 1);
-  });
-  el.nextPage.addEventListener("click", () => {
-    if (state.mode === "surah") flipSurahPage(1);
-    else if (state.mode === "hizb") flipHizbPage(1);
-    else loadPage(state.currentPage + 1);
-  });
+  el.prevPage.addEventListener("click", () => goToAdjacentPage(-1));
+  el.nextPage.addEventListener("click", () => goToAdjacentPage(1));
+
+  // ===== السحب يمينًا/يسارًا للتنقل بين الصفحات (بلا قطع صوت تسجيل أو تشغيل جارٍ) =====
+  // يعتمد على Pointer Events (يعمل باللمس وبالفأرة معًا بنفس الكود). يميّز بدقة بين:
+  //  - نقرة عادية (تكبير الصورة أو وضع علامة خطأ — تبقى تعمل تمامًا كما كانت)
+  //  - تمرير رأسي عادي لصفحة الويب (يُترك للمتصفح يتولاه بنفسه دون أي تدخّل لضمان سلاسته)
+  //  - سحبة أفقية فعلية (تُنقِّل الصفحة ثم تمنع "نقرة الشبح" التي قد تعقبها)
+  // ملاحظة تقنية: التتبّع أثناء السحبة يتم عبر مستمعين مؤقّتين على document (يُضافان عند
+  // pointerdown ويُزالان فور انتهاء السحبة) بدل setPointerCapture، حتى يستمر التتبّع بشكل
+  // صحيح حتى لو خرج الإصبع/المؤشر من حدود الصورة أثناء السحب، دون أي كلفة أداء دائمة.
+  (function setupPageSwipeNavigation() {
+    const wrap = el.pageImageWrap;
+    const MIN_SWIPE_DISTANCE = 42; // أقل مسافة أفقية (px) لاعتبار الحركة سحبة تنقّل فعلية
+    const MAX_OFF_AXIS = 65;       // أقصى انحراف رأسي مسموح به لتبقى الحركة أفقية بوضوح
+    const AXIS_LOCK_DISTANCE = 10; // مسافة صغيرة تكفي لتحديد اتجاه الحركة أفقي/رأسي
+
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let axis = null; // "x" أفقي مؤكَّد، "y" رأسي مؤكَّد، null لم يُحسم بعد
+    let suppressNextClick = false;
+
+    function onMove(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (axis === null && (Math.abs(dx) > AXIS_LOCK_DISTANCE || Math.abs(dy) > AXIS_LOCK_DISTANCE)) {
+        axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+      // نمنع التمرير الافتراضي فقط بعد التأكّد أن الحركة أفقية بوضوح، حتى لا نُعطِّل
+      // التمرير الرأسي الطبيعي للصفحة في أي لحظة أخرى (راجع أيضًا touch-action في CSS)
+      if (axis === "x" && e.cancelable) e.preventDefault();
+    }
+
+    function onUp(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const isSwipe = axis === "x" && Math.abs(dx) >= MIN_SWIPE_DISTANCE && Math.abs(dy) <= MAX_OFF_AXIS;
+      cleanup();
+      if (isSwipe) {
+        suppressNextClick = true;
+        goToAdjacentPage(dx < 0 ? 1 : -1); // سحب لليسار → الصفحة التالية، لليمين → السابقة
+      }
+    }
+
+    function onCancel() { cleanup(); }
+
+    function cleanup() {
+      pointerId = null;
+      axis = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onCancel);
+    }
+
+    wrap.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (state.queue) return; // القائمة لا تدعم هذا التنقّل، ولها أزرارها الخاصة أصلاً
+      if (e.target.closest(".error-mark")) return; // اترك التعامل مع علامات الأخطاء لمتحكّمها الخاص
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      axis = null;
+      document.addEventListener("pointermove", onMove, { passive: false });
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+    });
+
+    // طبقة حماية إضافية: يمنع سحب الصورة الأصلي بالمتصفح (يظهر عادة عند السحب بالفأرة على
+    // <img>)، لأنه كان يُلغي تسلسل أحداث المؤشر بالكامل (pointercancel) ويوقف السحبة فورًا.
+    wrap.addEventListener("dragstart", (e) => e.preventDefault());
+
+    // يمنع "نقرة شبح" (فتح تكبير الصورة أو وضع علامة خطأ) قد تُطلَق عادة عقب سحبة فعلية تمّت للتو
+    wrap.addEventListener("click", (e) => {
+      if (!suppressNextClick) return;
+      suppressNextClick = false;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+  })();
 
   el.pageInput.addEventListener("change", () => {
     if (state.mode !== "page") return;
@@ -2335,7 +2615,7 @@
 
   // منع فقدان تسجيل جارٍ عند إغلاق الصفحة
   window.addEventListener("beforeunload", (e) => {
-    const recording = (state.mediaRecorder && state.mediaRecorder.state === "recording") ||
+    const recording = isMainRecordingActive() ||
       (state.testMediaRecorder && state.testMediaRecorder.state === "recording");
     if (recording) {
       e.preventDefault();
