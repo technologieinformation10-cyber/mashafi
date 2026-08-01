@@ -189,6 +189,12 @@ body {
   border: 1px solid rgba(90,155,120,0.4);
 }
 
+.rec-paused-badge {
+  background: rgba(201,162,75,0.16);
+  color: var(--gold-soft);
+  border-color: rgba(201,162,75,0.45);
+}
+
 /* ===== صورة صفحة المصحف ===== */
 .page-image-wrap {
   position: relative;
@@ -203,6 +209,10 @@ body {
   align-items: center;
   justify-content: center;
   cursor: zoom-in;
+  /* يسمح للمتصفح بالتمرير الرأسي الطبيعي فورًا دون انتظار جافاسكربت، بينما
+     تتولى سحبة الإصبع الأفقية (التنقل بين الصفحات) عبر JS فقط — أداء أفضل
+     وتمرير أكثر سلاسة على الهواتف الأضعف. */
+  touch-action: pan-y;
 }
 
 .page-image {
@@ -210,7 +220,17 @@ body {
   max-height: 360px;
   object-fit: contain;
   display: block;
+  transition: opacity .12s ease, transform .12s ease;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
+/* انتقال تقليب الصفحة (أزرار السابق/التالي أو السحب) — صنف واحد فقط في كل لحظة،
+   يُبدَّل عبر JS (loadPageImage/runPageTransition). لا تأثير على الأداء أو الذاكرة:
+   تبديل صنف CSS فقط على نفس عنصر <img> الموجود، بلا أي عناصر إضافية.
+   تُلغى هذه الحركة تلقائيًا مع إعداد "تقليل الحركة" في النظام (انظر أسفل الملف). */
+.page-image.pg-shift-left  { opacity: 0; transform: translateX(-16px); }
+.page-image.pg-shift-right { opacity: 0; transform: translateX(16px); }
 
 .page-image-placeholder {
   padding: 30px 16px;
@@ -368,8 +388,28 @@ body {
 }
 .ctrl-btn .square.small { width: 9px; height: 9px; }
 
+/* أيقونة إيقاف مؤقت/استئناف تسجيل: شريطان صغيران، وتتحوّل لمثلث تشغيل صغير حين الاستئناف */
+.ctrl-btn .pause-icon {
+  width: 10px; height: 10px;
+  flex-shrink: 0;
+  background: linear-gradient(to right,
+    var(--gold-soft) 0, var(--gold-soft) 3px,
+    transparent 3px, transparent 7px,
+    var(--gold-soft) 7px, var(--gold-soft) 10px);
+}
+.ctrl-btn .pause-icon.is-resume {
+  width: 0; height: 0;
+  background: none;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid var(--gold-soft);
+}
+
 .record-btn { border-color: rgba(192,86,60,0.5); }
 .record-btn:hover { background: rgba(192,86,60,0.14); }
+
+.pause-btn { border-color: rgba(201,162,75,0.4); }
+.pause-btn:hover:not(:disabled) { background: rgba(201,162,75,0.12); }
 
 #stopRecordBtn .square { background: var(--danger-soft); }
 
