@@ -91,12 +91,13 @@
       <div class="page-status">
         <span id="pageNumberLabel">الصفحة 1</span>
         <span id="recordedBadge" class="badge hidden">مسجَّلة</span>
+        <span id="recPausedBadge" class="badge rec-paused-badge hidden">⏸ التسجيل متوقف مؤقتًا</span>
         <span id="errorCountBadge" class="badge error-count-badge hidden">عدد الأخطاء الحالية: 0</span>
       </div>
 
       <!-- صورة صفحة المصحف -->
       <div class="page-image-wrap" id="pageImageWrap" role="button" tabindex="0" aria-label="تكبير صورة الصفحة">
-        <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف">
+        <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف" draggable="false">
         <div id="pageImagePlaceholder" class="page-image-placeholder">
           لم تُضَف صورة هذه الصفحة بعد
         </div>
@@ -138,13 +139,17 @@
           <span class="dot"></span>
           <span class="btn-text" id="recordBtnText">تسجيل الصفحة</span>
         </button>
+        <button id="pauseRecordBtn" class="ctrl-btn pause-btn hidden" type="button" aria-label="إيقاف التسجيل مؤقتًا">
+          <span class="pause-icon" id="pauseRecordIcon" aria-hidden="true"></span>
+          <span class="btn-text" id="pauseRecordBtnText">إيقاف مؤقت</span>
+        </button>
         <button id="stopRecordBtn" class="ctrl-btn hidden" aria-label="إيقاف التسجيل">
           <span class="square"></span>
           <span class="btn-text">إيقاف التسجيل</span>
         </button>
         <span id="recTimer" class="rec-timer hidden">0:00</span>
       </div>
-      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك تقليب الصفحات أثناء التسجيل، ويستمر التسجيل متصلاً حتى تضغط إيقاف.</p>
+      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك التنقل بين الصفحات (بالأزرار أو بالسحب يمينًا/يسارًا) أثناء التسجيل أو الاستماع، دون أي انقطاع.</p>
 
       <!-- أزرار التشغيل -->
       <div class="control-row playback-row">
