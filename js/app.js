@@ -120,6 +120,13 @@
     clearPlaylistBtn: document.getElementById("clearPlaylistBtn"),
     startPlaylistBtn: document.getElementById("startPlaylistBtn"),
 
+    queueBar: document.getElementById("queueBar"),
+    queuePosition: document.getElementById("queuePosition"),
+    queueLabel: document.getElementById("queueLabel"),
+    queuePrevBtn: document.getElementById("queuePrevBtn"),
+    queueNextBtn: document.getElementById("queueNextBtn"),
+    queueStopBtn: document.getElementById("queueStopBtn"),
+
     toast: document.getElementById("toast"),
     fileProtocolWarning: document.getElementById("fileProtocolWarning"),
     dismissFileWarning: document.getElementById("dismissFileWarning"),
@@ -201,12 +208,10 @@
 
     playlistSelection: [], // [{type:'page'|'surah'|'hizb', id, label}] بترتيب الاختيار
     quiz: { juz: null, correctOrder: [], sequence: [], checked: false },
-    // تبقى queue دائمًا null الآن: تشغيل قائمة الاستماع (عنصر واحد أو أكثر)
-    // أصبح بالكامل مسؤولية GlobalPlayer المستقل (js/global-player.js)، المنفصل
-    // تمامًا عن حالة الصفحة الحالية. أُبقيت هذه الخانة دون حذف فقط حتى يبقى
-    // الشرط الموجود داخل startRecording() (أدناه) دون أي تعديل — قيمتها
-    // الثابتة null تجعله بأمان بلا أي أثر، دون لمس كود التسجيل نفسه.
-    queue: null,
+    queue: null, // { items: [...], index }
+
+    // معاينة سريعة لعنصر واحد داخل قائمة الاستماع (منفصلة عن مشغّل الصفحة الرئيسي)
+    preview: { audio: new Audio(), type: null, id: null, url: null },
 
     // معاينة نسخة واحدة من سجل التقدّم (منفصلة عن كل ما سبق)
     historyPreview: { audio: new Audio(), entryId: null, btn: null, url: null },
@@ -694,6 +699,7 @@
   // انتقال سلس بصريًا؛ لا يغيّر أي شيء في منطق تحميل التسجيل أو حالة التشغيل.
   async function loadPage(pageNum, direction) {
     pageNum = Math.max(1, Math.min(TOTAL_PAGES, pageNum));
+    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -718,6 +724,7 @@
   async function loadSurah(surahNumber) {
     const surah = surahByNumber(surahNumber);
     if (!surah) return;
+    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -745,6 +752,7 @@
   async function loadHizb(hizbNumber) {
     const hizb = hizbByNumber(hizbNumber);
     if (!hizb) return;
+    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -813,6 +821,7 @@
   // تمامًا دائمًا: في وضع السورة/الحزب لا تُلمَس حالة الصوت إطلاقًا (تقليب صورة فقط)،
   // وفي وضع الصفحة تُحمَّل صفحة مستقلة بتسجيلها الخاص (نفس سلوك الأزرار الأصلي).
   function goToAdjacentPage(delta) {
+    if (state.queue) return; // لقائمة الاستماع أزرار تنقّل خاصة بها منفصلة تمامًا عن هذه
     if (state.mode === "surah") flipSurahPage(delta);
     else if (state.mode === "hizb") flipHizbPage(delta);
     else loadPage(state.currentPage + delta, delta > 0 ? "next" : "prev");
@@ -1161,6 +1170,14 @@
       el.seekBar.value = 0;
       el.curTime.textContent = "0:00";
       updateRepeatInfo();
+      if (state.queue) {
+        const next = state.queue.index + 1;
+        if (next < state.queue.items.length) {
+          playQueueItem(next);
+        } else {
+          finishQueue();
+        }
+      }
     }
   });
 
@@ -1192,6 +1209,7 @@
   }
 
   async function renderPlaylistBody(pageNums, surahNums, hizbNums) {
+    stopPreview();
     el.playlistBody.innerHTML = "";
     if (pageNums.length === 0 && surahNums.length === 0 && hizbNums.length === 0) {
       const p = document.createElement("p");
@@ -1245,20 +1263,61 @@
     return idx === -1 ? null : idx + 1;
   }
 
-  // ----- تشغيل عنصر واحد داخل قائمة الاستماع (عبر GlobalPlayer المستقل) -----
-  // التشغيل الفعلي أصبح بالكامل مسؤولية GlobalPlayer (js/global-player.js)؛
-  // الدالة هنا تُبقي أيقونة "▶/⏸" في كل صف من صفوف نافذة القائمة متزامنة مع
-  // حالته الحقيقية، سواء تغيّرت من صف آخر في نفس النافذة أو من المشغّل
-  // المصغّر الثابت أسفل الشاشة.
-  function syncPlaylistRowIcons() {
-    el.playlistBody.querySelectorAll(".playlist-item-row").forEach((row) => {
-      const type = row.dataset.ptype;
-      const id = parseInt(row.dataset.pid, 10);
-      const playBtn = row.querySelector(".pl-play");
-      if (playBtn) playBtn.textContent = GlobalPlayer.isPlayingItem(type, id) ? "⏸" : "▶";
-    });
+  // ----- معاينة صوتية مباشرة لعنصر واحد في قائمة الاستماع -----
+  function stopPreview() {
+    state.preview.audio.pause();
+    state.preview.audio.currentTime = 0;
+    if (state.preview.url) { URL.revokeObjectURL(state.preview.url); state.preview.url = null; }
+    const prevType = state.preview.type, prevId = state.preview.id;
+    state.preview.type = null; state.preview.id = null;
+    if (prevType != null) updatePreviewButtonUI(prevType, prevId, false);
   }
-  GlobalPlayer.onChange(syncPlaylistRowIcons);
+
+  function updatePreviewButtonUI(type, id, playing) {
+    const row = el.playlistBody.querySelector(`.playlist-item-row[data-ptype="${type}"][data-pid="${id}"]`);
+    if (!row) return;
+    const playBtn = row.querySelector(".pl-play");
+    if (playBtn) playBtn.textContent = playing ? "⏸" : "▶";
+  }
+
+  async function togglePreview(type, id) {
+    const isSameActive = state.preview.type === type && state.preview.id === id;
+    if (isSameActive && !state.preview.audio.paused) {
+      state.preview.audio.pause();
+      updatePreviewButtonUI(type, id, false);
+      return;
+    }
+    if (isSameActive && state.preview.audio.paused && state.preview.audio.src) {
+      state.preview.audio.play();
+      updatePreviewButtonUI(type, id, true);
+      return;
+    }
+    // تشغيل عنصر مختلف: أوقف أي معاينة سابقة أولًا
+    stopPreview();
+    const rec = await getRecordByType(type, id);
+    if (!rec || !rec.blob) { showToast("لا يوجد تسجيل لتشغيله"); return; }
+    const url = URL.createObjectURL(rec.blob);
+    state.preview.type = type; state.preview.id = id; state.preview.url = url;
+    state.preview.audio.src = url;
+    state.preview.audio.currentTime = 0;
+    state.preview.audio.play();
+    updatePreviewButtonUI(type, id, true);
+  }
+
+  function replayPreview(type, id) {
+    if (state.preview.type === type && state.preview.id === id) {
+      state.preview.audio.currentTime = 0;
+      state.preview.audio.play();
+      updatePreviewButtonUI(type, id, true);
+    } else {
+      togglePreview(type, id);
+    }
+  }
+
+  state.preview.audio.addEventListener("ended", () => {
+    const t = state.preview.type, i = state.preview.id;
+    if (t != null) updatePreviewButtonUI(t, i, false);
+  });
 
   function goToItemForRerecord(type, id) {
     el.playlistModal.classList.add("hidden");
@@ -1271,7 +1330,7 @@
   async function deletePlaylistItem(type, id, label) {
     const ok = await showConfirm(`هل تريد حذف هذا التسجيل نهائيًا؟\n(${label})`);
     if (!ok) return;
-    GlobalPlayer.notifyDeleted(type, id);
+    if (state.preview.type === type && state.preview.id === id) stopPreview();
     await deleteRecordByType(type, id);
     state.playlistSelection = state.playlistSelection.filter((it) => !(it.type === type && it.id === id));
     showToast("تم حذف التسجيل");
@@ -1308,15 +1367,15 @@
     playBtn.type = "button";
     playBtn.className = "pl-ctrl-btn pl-play";
     playBtn.setAttribute("aria-label", `تشغيل ${label}`);
-    playBtn.textContent = GlobalPlayer.isPlayingItem(type, id) ? "⏸" : "▶";
-    playBtn.addEventListener("click", (e) => { e.stopPropagation(); GlobalPlayer.toggleItem(type, id, label); });
+    playBtn.textContent = "▶";
+    playBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePreview(type, id); });
 
     const repeatBtn = document.createElement("button");
     repeatBtn.type = "button";
     repeatBtn.className = "pl-ctrl-btn";
     repeatBtn.setAttribute("aria-label", `إعادة ${label}`);
     repeatBtn.textContent = "🔁";
-    repeatBtn.addEventListener("click", (e) => { e.stopPropagation(); GlobalPlayer.replay(type, id, label); });
+    repeatBtn.addEventListener("click", (e) => { e.stopPropagation(); replayPreview(type, id); });
 
     const rerecordBtn = document.createElement("button");
     rerecordBtn.type = "button";
@@ -1372,12 +1431,92 @@
   }
 
   // ===== محرك تشغيل قائمة الاستماع =====
-  // انتقل بالكامل إلى GlobalPlayer المستقل (js/global-player.js) عبر
-  // GlobalPlayer.playQueue(items). تشغيل عنصر واحد أو عدة عناصر من قائمة
-  // التسجيلات أصبح مستقلاً تمامًا عن حالة الصفحة الحالية (state.mode/
-  // currentPage/currentSurah/currentHizb)، فلا حاجة بعد الآن لإخفاء شريط
-  // التنقّل أو أوضاع التسجيل أثناء التشغيل، ولا لإعادة تحميل الصفحة الحالية
-  // بعد انتهاء القائمة أو إيقافها.
+  function stopQueueIfActive() {
+    if (!state.queue) return;
+    state.queue = null;
+    el.queueBar.classList.add("hidden");
+    el.pageNav.classList.remove("hidden");
+    el.modeTabs.classList.remove("hidden");
+    el.recordRow.classList.remove("hidden");
+    el.playlistBtn.classList.remove("hidden");
+  }
+
+  async function startQueue(items) {
+    if (!items || items.length === 0) return;
+    stopPlayback();
+    stopRecordingIfActive(true);
+    state.queue = { items, index: 0 };
+    el.pageNav.classList.add("hidden");
+    el.modeTabs.classList.add("hidden");
+    el.recordRow.classList.add("hidden");
+    el.surahRecordHint.classList.add("hidden");
+    el.surahRange.classList.add("hidden");
+    el.surahRangeControls.classList.add("hidden");
+    el.hizbRange.classList.add("hidden");
+    el.playlistBtn.classList.add("hidden");
+    el.queueBar.classList.remove("hidden");
+    await playQueueItem(0);
+  }
+
+  async function playQueueItem(i) {
+    if (!state.queue) return;
+    if (i < 0 || i >= state.queue.items.length) return;
+    state.queue.index = i;
+    const item = state.queue.items[i];
+    el.queuePosition.textContent = `المقطع ${i + 1} من ${state.queue.items.length}`;
+    el.queueLabel.textContent = item.label;
+    el.queuePrevBtn.disabled = i === 0;
+    el.queueNextBtn.disabled = i === state.queue.items.length - 1;
+
+    let rec, imagePage;
+    if (item.type === "surah") {
+      const surah = surahByNumber(item.id);
+      imagePage = surah ? surah.startPage : null;
+      rec = await QuranDB.getSurahRecording(item.id);
+    } else if (item.type === "hizb") {
+      const hizb = hizbByNumber(item.id);
+      imagePage = hizb ? hizb.startPage : null;
+      rec = await QuranDB.getHizbRecording(item.id);
+    } else {
+      imagePage = item.id;
+      rec = await QuranDB.getRecording(item.id);
+    }
+    el.pageNumberLabel.textContent = item.label;
+    if (imagePage) {
+      state.currentPage = imagePage;
+      loadPageImage(imagePage);
+    }
+    await setAudioFromRecord(rec);
+
+    if (rec && rec.blob) {
+      playAudio();
+    } else {
+      showToast(`لا يوجد تسجيل لـ ${item.label} — سيتم تخطّيه`);
+      const next = i + 1;
+      if (state.queue && next < state.queue.items.length) {
+        setTimeout(() => { if (state.queue) playQueueItem(next); }, 700);
+      } else {
+        finishQueue();
+      }
+    }
+  }
+
+  function currentLoadForMode() {
+    if (state.mode === "surah" && state.currentSurah) return loadSurah(state.currentSurah.number);
+    if (state.mode === "hizb" && state.currentHizb) return loadHizb(state.currentHizb.number);
+    return loadPage(state.currentPage);
+  }
+
+  function finishQueue() {
+    showToast("انتهت قائمة الاستماع");
+    stopQueueIfActive();
+    currentLoadForMode();
+  }
+
+  function exitQueueToNormalView() {
+    stopQueueIfActive();
+    currentLoadForMode();
+  }
 
   // =========================================================================
   // ===== اختبار حفظ الأحزاب (جديد بالكامل) =====
@@ -2309,6 +2448,7 @@
 
     wrap.addEventListener("pointerdown", (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (state.queue) return; // القائمة لا تدعم هذا التنقّل، ولها أزرارها الخاصة أصلاً
       if (e.target.closest(".error-mark")) return; // اترك التعامل مع علامات الأخطاء لمتحكّمها الخاص
       pointerId = e.pointerId;
       startX = e.clientX;
@@ -2382,11 +2522,9 @@
 
   // ===== ربط الأحداث: قائمة الاستماع =====
   el.playlistBtn.addEventListener("click", openPlaylistModal);
-  // إغلاق النافذة (بالزر أو بالنقر خارجها) لا يوقف أي تشغيل جارٍ بعد الآن —
-  // GlobalPlayer مستقل تمامًا ويستمر في الخلفية عبر المشغّل المصغّر.
-  el.closePlaylistModal.addEventListener("click", () => { el.playlistModal.classList.add("hidden"); });
+  el.closePlaylistModal.addEventListener("click", () => { stopPreview(); el.playlistModal.classList.add("hidden"); });
   el.playlistModal.addEventListener("click", (e) => {
-    if (e.target === el.playlistModal) el.playlistModal.classList.add("hidden");
+    if (e.target === el.playlistModal) { stopPreview(); el.playlistModal.classList.add("hidden"); }
   });
   el.clearPlaylistBtn.addEventListener("click", () => {
     state.playlistSelection = [];
@@ -2396,9 +2534,14 @@
   el.startPlaylistBtn.addEventListener("click", () => {
     if (state.playlistSelection.length === 0) return;
     const items = state.playlistSelection.slice();
+    stopPreview();
     el.playlistModal.classList.add("hidden");
-    GlobalPlayer.playQueue(items);
+    startQueue(items);
   });
+
+  el.queuePrevBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index - 1); });
+  el.queueNextBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index + 1); });
+  el.queueStopBtn.addEventListener("click", exitQueueToNormalView);
 
   // ===== ربط الأحداث: اختبار ترتيب السور =====
   el.quizBtn.addEventListener("click", () => {
@@ -2547,15 +2690,4 @@
     } catch (e) { /* تجاهل */ }
     loadPage(startPage);
   }
-
-  // ===== جسر صغير وآمن لملف js/global-player.js المستقل =====
-  // GlobalPlayer (مشغّل قائمة الاستماع في الخلفية) لا يعتمد على app.js في شيء
-  // يخص التنقّل أو التسجيل، لكنه يحتاج فقط: (1) طريقة موحّدة لعرض رسائل toast
-  // بنفس شكل بقية التطبيق، و(2) قراءة إعداد "عدد مرات التكرار" الحالي (وهو
-  // إعداد عام مشترك أصلاً بين كل أوضاع التشغيل). كلا الأمرين قراءة/عرض فقط —
-  // لا يمنح هذا الجسر ملف global-player.js أي قدرة على تعديل حالة app.js.
-  window.QuranAppBridge = {
-    showToast,
-    getRepeatTarget: () => state.repeatTarget,
-  };
 })();
