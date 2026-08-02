@@ -596,57 +596,177 @@ input:focus-visible {
   line-height: 1.6;
 }
 
-/* ===== شريط قائمة الاستماع ===== */
-.queue-bar {
+/* ===== المشغّل المصغّر العالمي (Mini Player) =====
+   ثابت أسفل الشاشة، يظهر فوق كل الصفحات والأوضاع (صفحة/سورة/حزب) أثناء تشغيل
+   أي تسجيل من قائمة التسجيلات، دون أن يحجب أو يعطّل أي عنصر تنقّل أسفله —
+   العنصر الخارجي شفاف للنقر (pointer-events: none) والبطاقة الداخلية فقط
+   قابلة للتفاعل. يبقى أسفل النوافذ المنبثقة (z-index أقل من .modal) حتى لا
+   يغطّي أزرارها؛ يعمل عنصر ▶/⏸ الخاص بكل تسجيل داخل نافذة القائمة نفسها
+   كبديل كامل للتحكّم أثناء فتح تلك النافذة تحديدًا. */
+.mini-player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  padding: 0 16px calc(14px + env(safe-area-inset-bottom, 0px));
+}
+
+.mini-player-inner {
+  pointer-events: auto;
+  width: 100%;
+  max-width: 480px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid rgba(201,162,75,0.4);
+  border-radius: 18px;
+  box-shadow: 0 -10px 32px rgba(0,0,0,0.45);
+  padding: 10px 14px 12px;
+}
+
+.mini-player-top {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: linear-gradient(180deg, var(--panel-2), var(--panel));
-  border: 1px solid rgba(201,162,75,0.35);
-  border-radius: 999px;
-  padding: 8px 10px 8px 14px;
-  margin-bottom: 18px;
+  margin-bottom: 6px;
 }
 
-.queue-nav-btn {
-  width: 34px;
-  height: 34px;
+.mini-player-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mini-player-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--gold-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-player-queue-pos {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mini-player-speed-btn {
+  flex-shrink: 0;
+  border: 1px solid rgba(201,162,75,0.4);
+  background: rgba(255,255,255,0.03);
+  color: var(--gold-soft);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.mini-player-speed-btn:hover { background: rgba(201,162,75,0.14); }
+
+.mini-player-seek-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+  margin-bottom: 6px;
+}
+.mini-player-seek-row span {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 30px;
+  text-align: center;
+  direction: rtl;
+}
+#miniPlayerSeek {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.14);
+  outline: none;
+}
+#miniPlayerSeek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--gold-soft);
+  cursor: pointer;
+  border: 2px solid var(--bg-deep);
+}
+#miniPlayerSeek::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--gold-soft);
+  border: 2px solid var(--bg-deep);
+  cursor: pointer;
+}
+
+.mini-player-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.mini-player-nav-btn {
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   border-radius: 50%;
   border: 1px solid rgba(201,162,75,0.35);
   background: var(--bg-deep);
   color: var(--gold-soft);
-  font-size: 17px;
+  font-size: 15px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.queue-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.mini-player-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.queue-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.35;
-}
-.queue-info span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#queuePosition { font-size: 11px; color: var(--muted); }
-#queueLabel { font-size: 14px; color: var(--gold-soft); font-weight: 700; }
-
-.queue-stop-btn {
+.mini-player-play-btn {
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
-  border: 1px solid rgba(192,86,60,0.5);
-  background: rgba(192,86,60,0.14);
-  color: var(--danger-soft);
-  font-size: 12.5px;
-  font-family: var(--font-ui);
-  border-radius: 999px;
-  padding: 8px 12px;
+  border-radius: 50%;
+  border: none;
+  background: var(--gold);
+  color: var(--bg-deep);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .12s ease;
 }
+.mini-player-play-btn:active { transform: scale(0.93); }
+.mini-player-play-btn .icon-play,
+.mini-player-play-btn .icon-pause { width: 19px; height: 19px; fill: var(--bg-deep); }
+.mini-player-play-btn .icon-play { margin-right: -2px; }
+
+.mini-player-stop-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: var(--panel-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mini-player-stop-btn:hover { background: rgba(255,255,255,0.08); }
+
+/* مساحة إضافية أسفل المحتوى حتى لا يغطّي المشغّل المصغّر آخر عناصر الصفحة */
+body.has-mini-player .app-shell { padding-bottom: 118px; }
 
 /* ===== زر فتح قائمة الاستماع ===== */
 .playlist-open-btn {
