@@ -69,6 +69,17 @@
 
   <div class="surah-range hidden" id="hizbRange"></div>
 
+  <!-- شريط حالة قائمة الاستماع (يظهر فقط أثناء تشغيل قائمة) -->
+  <div class="queue-bar hidden" id="queueBar">
+    <button id="queuePrevBtn" class="queue-nav-btn" aria-label="المقطع السابق">‹</button>
+    <div class="queue-info">
+      <span id="queuePosition">المقطع 1 من 1</span>
+      <span id="queueLabel">—</span>
+    </div>
+    <button id="queueNextBtn" class="queue-nav-btn" aria-label="المقطع التالي">›</button>
+    <button id="queueStopBtn" class="queue-stop-btn" aria-label="إنهاء القائمة">إنهاء القائمة</button>
+  </div>
+
   <!-- بطاقة الصفحة -->
   <main class="page-card">
     <div class="page-card-inner">
@@ -235,39 +246,6 @@
 <!-- صندوق تكبير صورة الصفحة -->
 <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="تكبير صورة الصفحة">
   <img id="lightboxImg" alt="صورة صفحة المصحف مكبَّرة">
-</div>
-
-<!-- المشغّل المصغّر العالمي: يظهر في كل صفحات/شاشات التطبيق أثناء تشغيل أي
-     تسجيل تم اختياره من قائمة التسجيلات، بشكل مستقل تمامًا عن التنقّل الحالي
-     في المصحف. يتحكّم به بالكامل js/global-player.js. -->
-<div id="miniPlayer" class="mini-player hidden" role="region" aria-label="مشغّل التسجيلات">
-  <div class="mini-player-inner">
-    <div class="mini-player-top">
-      <div class="mini-player-info">
-        <span id="miniPlayerLabel" class="mini-player-label">—</span>
-        <span id="miniPlayerQueuePos" class="mini-player-queue-pos hidden">1 / 1</span>
-      </div>
-      <button id="miniPlayerSpeedBtn" class="mini-player-speed-btn" type="button" aria-label="سرعة تشغيل قائمة الاستماع">1x</button>
-    </div>
-
-    <div class="mini-player-seek-row">
-      <span id="miniPlayerCurTime">0:00</span>
-      <input type="range" id="miniPlayerSeek" min="0" max="100" value="0" step="0.1" aria-label="موضع تشغيل قائمة الاستماع">
-      <span id="miniPlayerDurTime">0:00</span>
-    </div>
-
-    <div class="mini-player-controls">
-      <button id="miniPlayerPrevBtn" class="mini-player-nav-btn hidden" type="button" aria-label="المقطع السابق">‹</button>
-      <button id="miniPlayerPlayBtn" class="mini-player-play-btn" type="button" aria-label="تشغيل">
-        <svg id="miniPlayerPlayIcon" viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z"/></svg>
-        <svg id="miniPlayerPauseIcon" viewBox="0 0 24 24" class="icon-pause hidden"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
-      </button>
-      <button id="miniPlayerStopBtn" class="mini-player-stop-btn" type="button" aria-label="إيقاف تشغيل قائمة الاستماع">
-        <span class="square small"></span>
-      </button>
-      <button id="miniPlayerNextBtn" class="mini-player-nav-btn hidden" type="button" aria-label="المقطع التالي">›</button>
-    </div>
-  </div>
 </div>
 
 <!-- نافذة تأكيد عامة (تُستخدم لحذف تسجيلات قائمة الاستماع وغيرها) -->
@@ -439,7 +417,6 @@
 <script src="js/juz.js"></script>
 <script src="js/pages.js"></script>
 <script src="js/ahzab.js"></script>
-<script src="js/global-player.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
