@@ -73,6 +73,15 @@
     errorStatsList: document.getElementById("errorStatsList"),
     lightbox: document.getElementById("lightbox"),
     lightboxImg: document.getElementById("lightboxImg"),
+    lightboxPageLabel: document.getElementById("lightboxPageLabel"),
+    lightboxCloseBtn: document.getElementById("lightboxCloseBtn"),
+    lightboxViewport: document.getElementById("lightboxViewport"),
+    lightboxZoomSurface: document.getElementById("lightboxZoomSurface"),
+    lightboxErrorMarksLayer: document.getElementById("lightboxErrorMarksLayer"),
+    lightboxPrevBtn: document.getElementById("lightboxPrevBtn"),
+    lightboxNextBtn: document.getElementById("lightboxNextBtn"),
+    lightboxMarkModeBtn: document.getElementById("lightboxMarkModeBtn"),
+    lightboxMarkModeHint: document.getElementById("lightboxMarkModeHint"),
 
     playBtn: document.getElementById("playBtn"),
     playIcon: document.getElementById("playIcon"),
@@ -119,13 +128,6 @@
     playlistBody: document.getElementById("playlistBody"),
     clearPlaylistBtn: document.getElementById("clearPlaylistBtn"),
     startPlaylistBtn: document.getElementById("startPlaylistBtn"),
-
-    queueBar: document.getElementById("queueBar"),
-    queuePosition: document.getElementById("queuePosition"),
-    queueLabel: document.getElementById("queueLabel"),
-    queuePrevBtn: document.getElementById("queuePrevBtn"),
-    queueNextBtn: document.getElementById("queueNextBtn"),
-    queueStopBtn: document.getElementById("queueStopBtn"),
 
     toast: document.getElementById("toast"),
     fileProtocolWarning: document.getElementById("fileProtocolWarning"),
@@ -208,10 +210,12 @@
 
     playlistSelection: [], // [{type:'page'|'surah'|'hizb', id, label}] بترتيب الاختيار
     quiz: { juz: null, correctOrder: [], sequence: [], checked: false },
-    queue: null, // { items: [...], index }
-
-    // معاينة سريعة لعنصر واحد داخل قائمة الاستماع (منفصلة عن مشغّل الصفحة الرئيسي)
-    preview: { audio: new Audio(), type: null, id: null, url: null },
+    // تبقى queue دائمًا null الآن: تشغيل قائمة الاستماع (عنصر واحد أو أكثر)
+    // أصبح بالكامل مسؤولية GlobalPlayer المستقل (js/global-player.js)، المنفصل
+    // تمامًا عن حالة الصفحة الحالية. أُبقيت هذه الخانة دون حذف فقط حتى يبقى
+    // الشرط الموجود داخل startRecording() (أدناه) دون أي تعديل — قيمتها
+    // الثابتة null تجعله بأمان بلا أي أثر، دون لمس كود التسجيل نفسه.
+    queue: null,
 
     // معاينة نسخة واحدة من سجل التقدّم (منفصلة عن كل ما سبق)
     historyPreview: { audio: new Audio(), entryId: null, btn: null, url: null },
@@ -699,7 +703,6 @@
   // انتقال سلس بصريًا؛ لا يغيّر أي شيء في منطق تحميل التسجيل أو حالة التشغيل.
   async function loadPage(pageNum, direction) {
     pageNum = Math.max(1, Math.min(TOTAL_PAGES, pageNum));
-    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -724,7 +727,6 @@
   async function loadSurah(surahNumber) {
     const surah = surahByNumber(surahNumber);
     if (!surah) return;
-    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -752,7 +754,6 @@
   async function loadHizb(hizbNumber) {
     const hizb = hizbByNumber(hizbNumber);
     if (!hizb) return;
-    stopQueueIfActive();
     stopPlayback();
     stopRecordingIfActive(true);
 
@@ -821,7 +822,6 @@
   // تمامًا دائمًا: في وضع السورة/الحزب لا تُلمَس حالة الصوت إطلاقًا (تقليب صورة فقط)،
   // وفي وضع الصفحة تُحمَّل صفحة مستقلة بتسجيلها الخاص (نفس سلوك الأزرار الأصلي).
   function goToAdjacentPage(delta) {
-    if (state.queue) return; // لقائمة الاستماع أزرار تنقّل خاصة بها منفصلة تمامًا عن هذه
     if (state.mode === "surah") flipSurahPage(delta);
     else if (state.mode === "hizb") flipHizbPage(delta);
     else loadPage(state.currentPage + delta, delta > 0 ? "next" : "prev");
@@ -1170,14 +1170,6 @@
       el.seekBar.value = 0;
       el.curTime.textContent = "0:00";
       updateRepeatInfo();
-      if (state.queue) {
-        const next = state.queue.index + 1;
-        if (next < state.queue.items.length) {
-          playQueueItem(next);
-        } else {
-          finishQueue();
-        }
-      }
     }
   });
 
@@ -1209,7 +1201,6 @@
   }
 
   async function renderPlaylistBody(pageNums, surahNums, hizbNums) {
-    stopPreview();
     el.playlistBody.innerHTML = "";
     if (pageNums.length === 0 && surahNums.length === 0 && hizbNums.length === 0) {
       const p = document.createElement("p");
@@ -1263,61 +1254,40 @@
     return idx === -1 ? null : idx + 1;
   }
 
-  // ----- معاينة صوتية مباشرة لعنصر واحد في قائمة الاستماع -----
-  function stopPreview() {
-    state.preview.audio.pause();
-    state.preview.audio.currentTime = 0;
-    if (state.preview.url) { URL.revokeObjectURL(state.preview.url); state.preview.url = null; }
-    const prevType = state.preview.type, prevId = state.preview.id;
-    state.preview.type = null; state.preview.id = null;
-    if (prevType != null) updatePreviewButtonUI(prevType, prevId, false);
+  // ----- تشغيل عنصر واحد داخل قائمة الاستماع (عبر GlobalPlayer المستقل) -----
+  // التشغيل الفعلي أصبح بالكامل مسؤولية GlobalPlayer (js/global-player.js)؛
+  // الدالة هنا تُبقي أيقونة "▶/⏸" في كل صف من صفوف نافذة القائمة متزامنة مع
+  // حالته الحقيقية، سواء تغيّرت من صف آخر في نفس النافذة أو من المشغّل
+  // المصغّر الثابت أسفل الشاشة.
+  function syncPlaylistRowIcons() {
+    el.playlistBody.querySelectorAll(".playlist-item-row").forEach((row) => {
+      const type = row.dataset.ptype;
+      const id = parseInt(row.dataset.pid, 10);
+      const playBtn = row.querySelector(".pl-play");
+      if (playBtn) playBtn.textContent = GlobalPlayer.isPlayingItem(type, id) ? "⏸" : "▶";
+    });
   }
+  GlobalPlayer.onChange(syncPlaylistRowIcons);
 
-  function updatePreviewButtonUI(type, id, playing) {
-    const row = el.playlistBody.querySelector(`.playlist-item-row[data-ptype="${type}"][data-pid="${id}"]`);
-    if (!row) return;
-    const playBtn = row.querySelector(".pl-play");
-    if (playBtn) playBtn.textContent = playing ? "⏸" : "▶";
+  // عند بدء عنصر (صفحة/سورة/حزب) عمدًا من قائمة الاستماع — ▶ أو 🔁 على صف، أو
+  // "تشغيل القائمة"، أو أزرار السابق/التالي في المشغّل المصغّر — تُزامَن
+  // الشاشة الرئيسية معه تلقائيًا (نفس الوضع + نفس الصفحة الأولى)، حتى يتمكّن
+  // المستخدم من التنقّل بين كل صفحات تلك السورة/الحزب بأزرار التالي/السابق أو
+  // السحب العاديين لتصحيح الأخطاء أثناء الاستماع. loadPage/loadSurah/loadHizb
+  // لا تستدعي أي شيء يخصّ GlobalPlayer إطلاقًا (رُاجعت وأُزيلت كل الروابط بينهما
+  // سابقًا)، فالتشغيل في الخلفية يستمر دون أي قطع بغضّ النظر عن هذه المزامنة.
+  //
+  // هذه المزامنة عمدية فقط (راجع معامل deliberate في global-player.js): لا
+  // تُطلَق عند التقدّم التلقائي الصامت بين عناصر قائمة طويلة تعمل في الخلفية،
+  // حتى لا "تُفاجئ" المستخدمَ بقفزة في الشاشة الرئيسية قد تقطع تسجيلاً نشطًا
+  // يقوم به فعليًا في تلك اللحظة دون انتباه منه لتقدّم القائمة في الخلفية.
+  function syncMainViewToPlayingItem(item) {
+    if (!item) return;
+    if (item.type === "surah") { setModeUI("surah"); loadSurah(item.id); }
+    else if (item.type === "hizb") { setModeUI("hizb"); loadHizb(item.id); }
+    else { setModeUI("page"); loadPage(item.id); }
   }
-
-  async function togglePreview(type, id) {
-    const isSameActive = state.preview.type === type && state.preview.id === id;
-    if (isSameActive && !state.preview.audio.paused) {
-      state.preview.audio.pause();
-      updatePreviewButtonUI(type, id, false);
-      return;
-    }
-    if (isSameActive && state.preview.audio.paused && state.preview.audio.src) {
-      state.preview.audio.play();
-      updatePreviewButtonUI(type, id, true);
-      return;
-    }
-    // تشغيل عنصر مختلف: أوقف أي معاينة سابقة أولًا
-    stopPreview();
-    const rec = await getRecordByType(type, id);
-    if (!rec || !rec.blob) { showToast("لا يوجد تسجيل لتشغيله"); return; }
-    const url = URL.createObjectURL(rec.blob);
-    state.preview.type = type; state.preview.id = id; state.preview.url = url;
-    state.preview.audio.src = url;
-    state.preview.audio.currentTime = 0;
-    state.preview.audio.play();
-    updatePreviewButtonUI(type, id, true);
-  }
-
-  function replayPreview(type, id) {
-    if (state.preview.type === type && state.preview.id === id) {
-      state.preview.audio.currentTime = 0;
-      state.preview.audio.play();
-      updatePreviewButtonUI(type, id, true);
-    } else {
-      togglePreview(type, id);
-    }
-  }
-
-  state.preview.audio.addEventListener("ended", () => {
-    const t = state.preview.type, i = state.preview.id;
-    if (t != null) updatePreviewButtonUI(t, i, false);
-  });
+  GlobalPlayer.onItemChange(syncMainViewToPlayingItem);
 
   function goToItemForRerecord(type, id) {
     el.playlistModal.classList.add("hidden");
@@ -1330,7 +1300,7 @@
   async function deletePlaylistItem(type, id, label) {
     const ok = await showConfirm(`هل تريد حذف هذا التسجيل نهائيًا؟\n(${label})`);
     if (!ok) return;
-    if (state.preview.type === type && state.preview.id === id) stopPreview();
+    GlobalPlayer.notifyDeleted(type, id);
     await deleteRecordByType(type, id);
     state.playlistSelection = state.playlistSelection.filter((it) => !(it.type === type && it.id === id));
     showToast("تم حذف التسجيل");
@@ -1367,15 +1337,15 @@
     playBtn.type = "button";
     playBtn.className = "pl-ctrl-btn pl-play";
     playBtn.setAttribute("aria-label", `تشغيل ${label}`);
-    playBtn.textContent = "▶";
-    playBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePreview(type, id); });
+    playBtn.textContent = GlobalPlayer.isPlayingItem(type, id) ? "⏸" : "▶";
+    playBtn.addEventListener("click", (e) => { e.stopPropagation(); GlobalPlayer.toggleItem(type, id, label); });
 
     const repeatBtn = document.createElement("button");
     repeatBtn.type = "button";
     repeatBtn.className = "pl-ctrl-btn";
     repeatBtn.setAttribute("aria-label", `إعادة ${label}`);
     repeatBtn.textContent = "🔁";
-    repeatBtn.addEventListener("click", (e) => { e.stopPropagation(); replayPreview(type, id); });
+    repeatBtn.addEventListener("click", (e) => { e.stopPropagation(); GlobalPlayer.replay(type, id, label); });
 
     const rerecordBtn = document.createElement("button");
     rerecordBtn.type = "button";
@@ -1431,92 +1401,12 @@
   }
 
   // ===== محرك تشغيل قائمة الاستماع =====
-  function stopQueueIfActive() {
-    if (!state.queue) return;
-    state.queue = null;
-    el.queueBar.classList.add("hidden");
-    el.pageNav.classList.remove("hidden");
-    el.modeTabs.classList.remove("hidden");
-    el.recordRow.classList.remove("hidden");
-    el.playlistBtn.classList.remove("hidden");
-  }
-
-  async function startQueue(items) {
-    if (!items || items.length === 0) return;
-    stopPlayback();
-    stopRecordingIfActive(true);
-    state.queue = { items, index: 0 };
-    el.pageNav.classList.add("hidden");
-    el.modeTabs.classList.add("hidden");
-    el.recordRow.classList.add("hidden");
-    el.surahRecordHint.classList.add("hidden");
-    el.surahRange.classList.add("hidden");
-    el.surahRangeControls.classList.add("hidden");
-    el.hizbRange.classList.add("hidden");
-    el.playlistBtn.classList.add("hidden");
-    el.queueBar.classList.remove("hidden");
-    await playQueueItem(0);
-  }
-
-  async function playQueueItem(i) {
-    if (!state.queue) return;
-    if (i < 0 || i >= state.queue.items.length) return;
-    state.queue.index = i;
-    const item = state.queue.items[i];
-    el.queuePosition.textContent = `المقطع ${i + 1} من ${state.queue.items.length}`;
-    el.queueLabel.textContent = item.label;
-    el.queuePrevBtn.disabled = i === 0;
-    el.queueNextBtn.disabled = i === state.queue.items.length - 1;
-
-    let rec, imagePage;
-    if (item.type === "surah") {
-      const surah = surahByNumber(item.id);
-      imagePage = surah ? surah.startPage : null;
-      rec = await QuranDB.getSurahRecording(item.id);
-    } else if (item.type === "hizb") {
-      const hizb = hizbByNumber(item.id);
-      imagePage = hizb ? hizb.startPage : null;
-      rec = await QuranDB.getHizbRecording(item.id);
-    } else {
-      imagePage = item.id;
-      rec = await QuranDB.getRecording(item.id);
-    }
-    el.pageNumberLabel.textContent = item.label;
-    if (imagePage) {
-      state.currentPage = imagePage;
-      loadPageImage(imagePage);
-    }
-    await setAudioFromRecord(rec);
-
-    if (rec && rec.blob) {
-      playAudio();
-    } else {
-      showToast(`لا يوجد تسجيل لـ ${item.label} — سيتم تخطّيه`);
-      const next = i + 1;
-      if (state.queue && next < state.queue.items.length) {
-        setTimeout(() => { if (state.queue) playQueueItem(next); }, 700);
-      } else {
-        finishQueue();
-      }
-    }
-  }
-
-  function currentLoadForMode() {
-    if (state.mode === "surah" && state.currentSurah) return loadSurah(state.currentSurah.number);
-    if (state.mode === "hizb" && state.currentHizb) return loadHizb(state.currentHizb.number);
-    return loadPage(state.currentPage);
-  }
-
-  function finishQueue() {
-    showToast("انتهت قائمة الاستماع");
-    stopQueueIfActive();
-    currentLoadForMode();
-  }
-
-  function exitQueueToNormalView() {
-    stopQueueIfActive();
-    currentLoadForMode();
-  }
+  // انتقل بالكامل إلى GlobalPlayer المستقل (js/global-player.js) عبر
+  // GlobalPlayer.playQueue(items). تشغيل عنصر واحد أو عدة عناصر من قائمة
+  // التسجيلات أصبح مستقلاً تمامًا عن حالة الصفحة الحالية (state.mode/
+  // currentPage/currentSurah/currentHizb)، فلا حاجة بعد الآن لإخفاء شريط
+  // التنقّل أو أوضاع التسجيل أثناء التشغيل، ولا لإعادة تحميل الصفحة الحالية
+  // بعد انتهاء القائمة أو إيقافها.
 
   // =========================================================================
   // ===== اختبار حفظ الأحزاب (جديد بالكامل) =====
@@ -2131,45 +2021,110 @@
 
   // يحسب موضع البكسل لعلامة (نسبةً لصورة الصفحة الفعلية المعروضة، لا لإطارها،
   // حتى تبقى صحيحة رغم اختلاف أبعاد الصورة عن أبعاد الإطار المحيط بها)
-  function computeMarkPixelPositionIn(wrapEl, imgEl, xPercent, yPercent) {
+  // scale: معامل التكبير الحالي المُطبَّق (عبر CSS transform) على حاوية أعلى من
+  // wrapEl، إن وُجد (افتراضيًا 1 لكل الاستخدامات الحالية غير المكبَّرة، فلا يتغيّر
+  // سلوكها إطلاقًا). ضروري لأن getBoundingClientRect يقيس الأبعاد "بعد" أي
+  // transform، بينما style.left/top يُفسَّران "قبل" أي transform على العنصر
+  // نفسه؛ القسمة على scale تُرجع القيمة الصحيحة لتلك المسافة "قبل" التحويل.
+  function computeMarkPixelPositionIn(wrapEl, imgEl, xPercent, yPercent, scale) {
+    scale = scale || 1;
     const wrapRect = wrapEl.getBoundingClientRect();
     const imgRect = imgEl.getBoundingClientRect();
     const offsetX = imgRect.left - wrapRect.left;
     const offsetY = imgRect.top - wrapRect.top;
     return {
-      left: offsetX + (xPercent / 100) * imgRect.width,
-      top: offsetY + (yPercent / 100) * imgRect.height,
+      left: (offsetX + (xPercent / 100) * imgRect.width) / scale,
+      top: (offsetY + (yPercent / 100) * imgRect.height) / scale,
     };
   }
 
   // "متحكّم علامات" مستقل قابل لإنشاء أكثر من نسخة منه في آن واحد — نسخة واحدة
   // لعرض الصفحة الرئيسي، ونسخة مستقلة لكل بطاقة في شاشة مراجعة اختبار الحفظ،
   // كلها تقرأ/تكتب من نفس مخزن "errorMarks" بحسب رقم الصفحة.
-  function createMarkController({ wrapEl, imgEl, layerEl, badgeEl, toggleBtn, hintEl, getPage }) {
+  function createMarkController({ wrapEl, imgEl, layerEl, badgeEl, toggleBtn, hintEl, getPage, getScale, onActiveChange }) {
     let marks = [];
     let active = false;
+    if (typeof getScale !== "function") getScale = () => 1;
 
     function makeDot(mark) {
       const dot = document.createElement("div");
       dot.className = "error-mark";
       dot.dataset.markId = mark.id;
       dot.setAttribute("role", "button");
-      dot.setAttribute("aria-label", "حذف علامة الخطأ هذه");
+      dot.setAttribute("aria-label", "علامة خطأ — اضغط لحذفها، أو اسحبها لتغيير موضعها");
       dot.textContent = "×";
-      const pos = computeMarkPixelPositionIn(wrapEl, imgEl, mark.xPercent, mark.yPercent);
+      const pos = computeMarkPixelPositionIn(wrapEl, imgEl, mark.xPercent, mark.yPercent, getScale());
       dot.style.left = pos.left + "px";
       dot.style.top = pos.top + "px";
-      const onDelete = (e) => { e.stopPropagation(); removeMark(mark.id); };
-      dot.addEventListener("click", onDelete);
-      let pressTimer = null;
-      const startPress = (e) => { pressTimer = setTimeout(() => onDelete(e), 550); };
-      const cancelPress = () => clearTimeout(pressTimer);
-      dot.addEventListener("touchstart", startPress, { passive: true });
-      dot.addEventListener("touchend", cancelPress);
-      dot.addEventListener("touchmove", cancelPress);
-      dot.addEventListener("mousedown", startPress);
-      dot.addEventListener("mouseup", cancelPress);
-      dot.addEventListener("mouseleave", cancelPress);
+
+      // سحب علامة موجودة لتغيير موضعها — يعمل بنفس الدقة أثناء التكبير (getScale)
+      // لأنه يعيد استخدام نفس صيغة computeMarkPixelPositionIn المُصحَّحة رياضيًا،
+      // وبنفس منطق "استبعاد النقرة الشبح بعد سحب فعلي" (suppressClick) المتّبع
+      // أصلاً في المشروع لسحب تقليب الصفحات. لا يزال النقر البسيط بلا حركة يحذف
+      // العلامة تمامًا كما كان سابقًا؛ ما تغيّر هو إضافة السحب فقط.
+      const DRAG_THRESHOLD = 6; // px
+      let startX = 0, startY = 0, dragging = false, suppressClick = false, activePointerId = null;
+
+      function livePercentAt(clientX, clientY) {
+        const imgRect = imgEl.getBoundingClientRect();
+        if (imgRect.width === 0 || imgRect.height === 0) return null;
+        return {
+          xPercent: Math.max(0, Math.min(100, ((clientX - imgRect.left) / imgRect.width) * 100)),
+          yPercent: Math.max(0, Math.min(100, ((clientY - imgRect.top) / imgRect.height) * 100)),
+        };
+      }
+
+      dot.addEventListener("pointerdown", (e) => {
+        e.stopPropagation(); // لا تصل بداية اللمس هذه لأي معالج تنقّل/تكبير خلف العلامة
+        activePointerId = e.pointerId;
+        startX = e.clientX;
+        startY = e.clientY;
+        dragging = false;
+        try { dot.setPointerCapture(e.pointerId); } catch (err) { /* يمكن تجاهله بأمان */ }
+      });
+
+      dot.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== activePointerId) return;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (!dragging && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+          dragging = true;
+          dot.classList.add("dragging");
+        }
+        if (dragging) {
+          const p = livePercentAt(e.clientX, e.clientY);
+          if (p) {
+            const pos2 = computeMarkPixelPositionIn(wrapEl, imgEl, p.xPercent, p.yPercent, getScale());
+            dot.style.left = pos2.left + "px";
+            dot.style.top = pos2.top + "px";
+          }
+        }
+      });
+
+      function endDrag(e) {
+        if (e.pointerId !== activePointerId) return;
+        activePointerId = null;
+        dot.classList.remove("dragging");
+        if (dragging) {
+          dragging = false;
+          suppressClick = true; // النقرة التالية (إن حدثت) ناتجة عن رفع الإصبع بعد سحب، وليست نقرة حذف
+          const p = livePercentAt(e.clientX, e.clientY);
+          if (p) { mark.xPercent = p.xPercent; mark.yPercent = p.yPercent; persist(); }
+          else reposition(); // فشل قياس نادر: نعيد رسمها في موضعها المحفوظ الصحيح بدل تركها في مكان خاطئ
+        }
+      }
+      dot.addEventListener("pointerup", endDrag);
+      dot.addEventListener("pointercancel", () => {
+        activePointerId = null;
+        dragging = false;
+        dot.classList.remove("dragging");
+      });
+
+      dot.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (suppressClick) { suppressClick = false; return; }
+        removeMark(mark.id);
+      });
+
       return dot;
     }
 
@@ -2184,7 +2139,7 @@
       layerEl.querySelectorAll(".error-mark").forEach((dot) => {
         const m = marks.find((x) => String(x.id) === dot.dataset.markId);
         if (!m) return;
-        const pos = computeMarkPixelPositionIn(wrapEl, imgEl, m.xPercent, m.yPercent);
+        const pos = computeMarkPixelPositionIn(wrapEl, imgEl, m.xPercent, m.yPercent, getScale());
         dot.style.left = pos.left + "px";
         dot.style.top = pos.top + "px";
       });
@@ -2228,11 +2183,13 @@
     }
 
     function setActive(next) {
+      if (active === next) return; // يمنع إعادة رسم زائدة، ويكسر أي حلقة تكرار عند مزامنة متحكّمين معًا
       active = next;
       if (toggleBtn) toggleBtn.setAttribute("aria-pressed", active ? "true" : "false");
       if (hintEl) hintEl.classList.toggle("hidden", !active);
       wrapEl.classList.toggle("mark-mode-active", active);
       updateBadge();
+      if (typeof onActiveChange === "function") onActiveChange(active);
     }
 
     wrapEl.addEventListener("click", (e) => {
@@ -2245,7 +2202,7 @@
     let resizeTimer = null;
     window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(reposition, 120); });
 
-    return { load, render, reposition, setActive, isActive: () => active };
+    return { load, render, reposition, setActive, isActive: () => active, addAt: addAtClientXY };
   }
 
   // المتحكّم الرئيسي لصورة الصفحة المعروضة في الشاشة الأساسية
@@ -2253,6 +2210,24 @@
     wrapEl: el.pageImageWrap, imgEl: el.pageImage, layerEl: el.errorMarksLayer,
     badgeEl: el.errorCountBadge, toggleBtn: el.markErrorModeBtn, hintEl: el.markModeHint,
     getPage: () => state.currentPage,
+    onActiveChange: (v) => lightboxMarkController.setActive(v),
+  });
+
+  // متحكّم مستقل ثانٍ لعارض lightbox (نسخة "حقيقية" بالتكبير/التحريك من نفس
+  // الصفحة). يقرأ/يكتب من نفس مخزن "errorMarks" (نفس getPage)، ويُمرَّر له
+  // مستوى التكبير الحيّ (getScale) حتى تبقى العلامات دقيقة الموضع تمامًا أثناء
+  // التكبير — راجع الشرح الرياضي أعلى computeMarkPixelPositionIn. وضع "علامة
+  // الخطأ" مُزامَن بالكامل مع المتحكّم الرئيسي عبر onActiveChange في
+  // الاتجاهين، فتفعيله من الشاشة الرئيسية أو من داخل lightbox يُفعِّله في
+  // الاثنين معًا دائمًا. lightboxZoom تُعرَّف بعد قليل أدناه؛ الإشارة إليها هنا
+  // آمنة تمامًا لأنها داخل دالة سهمية لن تُنفَّذ فعليًا إلا لاحقًا عند إعادة
+  // رسم فعلية، بعد اكتمال تعريفها.
+  const lightboxMarkController = createMarkController({
+    wrapEl: el.lightboxZoomSurface, imgEl: el.lightboxImg, layerEl: el.lightboxErrorMarksLayer,
+    toggleBtn: el.lightboxMarkModeBtn, hintEl: el.lightboxMarkModeHint,
+    getPage: () => state.currentPage,
+    getScale: () => (lightboxZoom ? lightboxZoom.getScale() : 1),
+    onActiveChange: (v) => mainMarkController.setActive(v),
   });
 
   async function loadErrorMarksForPage(pageNum) {
@@ -2448,7 +2423,6 @@
 
     wrap.addEventListener("pointerdown", (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
-      if (state.queue) return; // القائمة لا تدعم هذا التنقّل، ولها أزرارها الخاصة أصلاً
       if (e.target.closest(".error-mark")) return; // اترك التعامل مع علامات الأخطاء لمتحكّمها الخاص
       pointerId = e.pointerId;
       startX = e.clientX;
@@ -2498,19 +2472,77 @@
     updateRepeatInfo();
   });
 
-  el.pageImageWrap.addEventListener("click", () => {
-    if (el.pageImage.classList.contains("hidden")) return;
-    if (mainMarkController.isActive()) return; // المتحكّم يتولى النقر بنفسه في هذه الحالة
-    el.lightboxImg.src = el.pageImage.src;
-    el.lightbox.classList.remove("hidden");
+  // ===== عارض التكبير (lightbox): تكبير/تحريك حقيقيان + تنقّل + علامات =====
+  // كل التنقّل هنا (أزرار lightbox أو السحب عند scale=1) يمرّ عبر
+  // goToAdjacentPage نفسها المستخدمة في الشاشة الرئيسية — لا يوجد هنا أي
+  // استدعاء لـ stopPlayback أو ما يشبهه، فتشغيل GlobalPlayer في الخلفية (إن
+  // كان جاريًا) يستمر دون أي قطع، تمامًا كالتنقّل من الشاشة الرئيسية.
+  let lightboxRepositionScheduled = false;
+  function scheduleLightboxReposition() {
+    if (lightboxRepositionScheduled) return;
+    lightboxRepositionScheduled = true;
+    requestAnimationFrame(() => {
+      lightboxRepositionScheduled = false;
+      lightboxMarkController.reposition();
+    });
+  }
+
+  const lightboxZoom = ZoomViewer.attach({
+    viewportEl: el.lightboxViewport,
+    surfaceEl: el.lightboxZoomSurface,
+    onTap: (clientX, clientY) => {
+      if (lightboxMarkController.isActive()) lightboxMarkController.addAt(clientX, clientY);
+    },
+    onSwipeNav: (dir) => {
+      // dir: اتجاه حركة الإصبع الفعلي على الشاشة (نفس منطق setupPageSwipeNavigation
+      // تمامًا: سحب لليسار = الصفحة التالية)، بغضّ النظر عن الوضع الحالي.
+      goToAdjacentPage(dir === "left" ? 1 : -1);
+      syncLightboxToCurrentPage();
+    },
+    onZoomChange: scheduleLightboxReposition,
   });
+
+  function openLightbox() {
+    if (el.pageImage.classList.contains("hidden")) return;
+    if (mainMarkController.isActive()) return; // المتحكّم الرئيسي يتولى النقر بنفسه في هذه الحالة
+    el.lightboxImg.src = el.pageImage.src;
+    el.lightboxPageLabel.textContent = el.pageNumberLabel.textContent;
+    el.lightbox.classList.remove("hidden");
+    lightboxZoom.reset();
+    lightboxMarkController.load();
+  }
+
+  function closeLightbox() {
+    el.lightbox.classList.add("hidden");
+    el.lightboxImg.removeAttribute("src");
+    lightboxZoom.reset();
+    mainMarkController.load(); // أي إضافة/حذف علامة وقعت داخل lightbox تنعكس فورًا على الشاشة الرئيسية
+  }
+
+  function syncLightboxToCurrentPage() {
+    el.lightboxImg.src = pageImageSrc(state.currentPage);
+    el.lightboxPageLabel.textContent = el.pageNumberLabel.textContent;
+    lightboxZoom.reset();
+    lightboxMarkController.load();
+  }
+
+  el.pageImageWrap.addEventListener("click", openLightbox);
   el.pageImageWrap.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") el.pageImageWrap.click();
   });
-  el.lightbox.addEventListener("click", () => {
-    el.lightbox.classList.add("hidden");
-    el.lightboxImg.removeAttribute("src");
+  el.lightboxCloseBtn.addEventListener("click", closeLightbox);
+  el.lightbox.addEventListener("click", (e) => {
+    // الصورة أصبحت تفاعلية بالكامل (تكبير/سحب/علامات)، فالإغلاق الآن فقط عبر
+    // زر ✕ أو النقر على الخلفية المظلمة تحديدًا أو مفتاح Esc — وليس أي نقرة
+    // داخل الصورة نفسها كما كان سابقًا.
+    if (e.target === el.lightbox) closeLightbox();
   });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el.lightbox.classList.contains("hidden")) closeLightbox();
+  });
+
+  el.lightboxNextBtn.addEventListener("click", () => { goToAdjacentPage(1); syncLightboxToCurrentPage(); });
+  el.lightboxPrevBtn.addEventListener("click", () => { goToAdjacentPage(-1); syncLightboxToCurrentPage(); });
 
   // ===== ربط الأحداث: علامات مواضع الأخطاء =====
   // (تفعيل/تعطيل وضع العلامة على الشاشة الرئيسية مربوط داخليًا عبر mainMarkController)
@@ -2522,9 +2554,11 @@
 
   // ===== ربط الأحداث: قائمة الاستماع =====
   el.playlistBtn.addEventListener("click", openPlaylistModal);
-  el.closePlaylistModal.addEventListener("click", () => { stopPreview(); el.playlistModal.classList.add("hidden"); });
+  // إغلاق النافذة (بالزر أو بالنقر خارجها) لا يوقف أي تشغيل جارٍ بعد الآن —
+  // GlobalPlayer مستقل تمامًا ويستمر في الخلفية عبر المشغّل المصغّر.
+  el.closePlaylistModal.addEventListener("click", () => { el.playlistModal.classList.add("hidden"); });
   el.playlistModal.addEventListener("click", (e) => {
-    if (e.target === el.playlistModal) { stopPreview(); el.playlistModal.classList.add("hidden"); }
+    if (e.target === el.playlistModal) el.playlistModal.classList.add("hidden");
   });
   el.clearPlaylistBtn.addEventListener("click", () => {
     state.playlistSelection = [];
@@ -2534,14 +2568,9 @@
   el.startPlaylistBtn.addEventListener("click", () => {
     if (state.playlistSelection.length === 0) return;
     const items = state.playlistSelection.slice();
-    stopPreview();
     el.playlistModal.classList.add("hidden");
-    startQueue(items);
+    GlobalPlayer.playQueue(items);
   });
-
-  el.queuePrevBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index - 1); });
-  el.queueNextBtn.addEventListener("click", () => { if (state.queue) playQueueItem(state.queue.index + 1); });
-  el.queueStopBtn.addEventListener("click", exitQueueToNormalView);
 
   // ===== ربط الأحداث: اختبار ترتيب السور =====
   el.quizBtn.addEventListener("click", () => {
@@ -2690,4 +2719,15 @@
     } catch (e) { /* تجاهل */ }
     loadPage(startPage);
   }
+
+  // ===== جسر صغير وآمن لملف js/global-player.js المستقل =====
+  // GlobalPlayer (مشغّل قائمة الاستماع في الخلفية) لا يعتمد على app.js في شيء
+  // يخص التنقّل أو التسجيل، لكنه يحتاج فقط: (1) طريقة موحّدة لعرض رسائل toast
+  // بنفس شكل بقية التطبيق، و(2) قراءة إعداد "عدد مرات التكرار" الحالي (وهو
+  // إعداد عام مشترك أصلاً بين كل أوضاع التشغيل). كلا الأمرين قراءة/عرض فقط —
+  // لا يمنح هذا الجسر ملف global-player.js أي قدرة على تعديل حالة app.js.
+  window.QuranAppBridge = {
+    showToast,
+    getRepeatTarget: () => state.repeatTarget,
+  };
 })();
