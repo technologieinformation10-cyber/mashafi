@@ -4,7 +4,7 @@
  * ملاحظة: التسجيلات الصوتية نفسها لا تُخزَّن هنا، بل في IndexedDB (db.js).
  */
 
-const CACHE_NAME = "quran-review-cache-v15";
+const CACHE_NAME = "quran-review-cache-v17";
 const APP_SHELL = [
   "./",
   "./index.html",
