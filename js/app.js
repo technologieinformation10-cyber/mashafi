@@ -2406,15 +2406,6 @@
     return `mc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  // تاريخ رقمي بسيط (يوم/شهر/سنة) خاص ببطاقات الأخطاء — يتفادى أسماء الأشهر
-  // نهائيًا (لا "أغسطس" ولا "أوت") حتى لا يلتبس على أي قارئ مهما كانت لهجته.
-  function formatMcDate(timestamp) {
-    const d = new Date(timestamp);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    return `${dd}/${mm}/${d.getFullYear()}`;
-  }
-
   // يملأ قائمة الآيات المتاحة في صفحة معيّنة (قد تحوي الصفحة أكثر من سورة عند
   // صفحات الانتقال بين سورتين)، بالاعتماد على QURAN_PAGES المحقَّقة فعليًا.
   function populateMcAyahSelect(pageNum) {
@@ -2481,8 +2472,7 @@
 
   // يُستدعى عند اختيار آية جديدة في نافذة الإنشاء/التعديل. لا يكتب فوق نص كتبه
   // المستخدم يدويًا أبدًا — فقط عندما يكون الحقل فارغًا أو لا يزال يطابق آخر
-  // اقتراح تلقائي وضعناه نحن بالضبط. الأولوية: (١) نص سبق للمستخدم كتابته لنفس
-  // الآية (محفوظ محليًا، ثقة كاملة)، ثم (٢) اقتراح جزئي من بنك أسئلة الحزب.
+  // اقتراح تلقائي وضعناه نحن بالضبط.
   async function onMcAyahSelectChange() {
     const val = el.mcAyahSelect.value;
     el.mcAutoFillHint.classList.add("hidden");
@@ -2493,27 +2483,11 @@
     const pageNum = parseInt(el.mcCardPage.value, 10);
     const canOverwrite = el.mcAyahText.value === "" || el.mcAyahText.value === state.mc.autoFilledText;
     if (!canOverwrite) return;
-
-    let cached = null;
-    try { cached = await QuranDB.getCachedAyahText(surahNum, ayahNum); } catch (e) { cached = null; }
-    if (el.mcAyahSelect.value !== val) return; // بدّل المستخدم الآية أثناء الانتظار
-
-    if (cached && cached.text) {
-      el.mcAyahText.value = cached.text;
-      state.mc.autoFilledText = cached.text;
-      el.mcAutoFillHint.textContent = "✅ هذا النص محفوظ من إدخالك السابق لهذه الآية — راجعه سريعًا فقط، ولا حاجة لإعادة كتابته.";
-      el.mcAutoFillHint.classList.remove("hidden");
-      state.mc.markedWords.clear();
-      renderWordPicker();
-      return;
-    }
-
     const prefix = await fetchAyahPrefixHint(pageNum, surahNum, ayahNum);
-    if (el.mcAyahSelect.value !== val) return;
+    if (el.mcAyahSelect.value !== val) return; // بدّل المستخدم الآية أثناء الانتظار
     if (prefix) {
       el.mcAyahText.value = prefix;
       state.mc.autoFilledText = prefix;
-      el.mcAutoFillHint.textContent = "اقتراح تلقائي لبداية الآية فقط من بيانات الحزب — أكمِله وتأكّد منه، فالتطبيق لا يملك نص المصحف كاملاً (صور فقط). بعد أول مرة تكتبه، سيُحفظ ويُملأ تلقائيًا للمرات القادمة.";
       el.mcAutoFillHint.classList.remove("hidden");
     } else {
       el.mcAyahText.value = "";
@@ -2599,7 +2573,6 @@
         await QuranDB.saveMistakeCard(card);
         showToast("تم حفظ بطاقة الخطأ");
       }
-      try { await QuranDB.saveCachedAyahText(surahNum, ayahNum, text); } catch (e) { /* لا يوقف حفظ البطاقة نفسها */ }
       el.createMistakeCardModal.classList.add("hidden");
       if (state.currentPage === page) refreshMistakeIndicatorForCurrentPage();
     } catch (e) {
@@ -2802,7 +2775,7 @@
     footer.className = "fmc-footer";
     const stats = document.createElement("span");
     stats.className = "fmc-footer-stats";
-    stats.textContent = `${formatMcDate(card.createdAt)} · روجعت ${card.reviewCount || 0} ${(card.reviewCount || 0) === 1 ? "مرة" : "مرات"}`;
+    stats.textContent = `${formatArabicDate(card.createdAt)} · روجعت ${card.reviewCount || 0} ${(card.reviewCount || 0) === 1 ? "مرة" : "مرات"}`;
     footer.appendChild(stats);
     const masterBtn = document.createElement("button");
     masterBtn.type = "button";
@@ -2982,7 +2955,7 @@
     footRow.className = "mc-card-footer-row";
     const stats = document.createElement("span");
     stats.className = "mc-card-stats";
-    const s1 = document.createElement("span"); s1.textContent = `📅 ${formatMcDate(card.createdAt)}`;
+    const s1 = document.createElement("span"); s1.textContent = `📅 ${formatArabicDate(card.createdAt)}`;
     const s2 = document.createElement("span"); s2.textContent = `🔁 روجعت ${card.reviewCount || 0}`;
     const s3 = document.createElement("span"); s3.textContent = `❌ تكرر ${card.timesWrong || 0}`;
     stats.appendChild(s1); stats.appendChild(s2); stats.appendChild(s3);
