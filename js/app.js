@@ -18,6 +18,9 @@
   const TOTAL_PAGES = 604;
   const RING_CIRCUMFERENCE = 2 * Math.PI * 62; // نفس نصف قطر دائرة الـ SVG
   const QUESTIONS_PER_ATTEMPT = 30;
+  const PAGE_TRANSITION_MS = 120; // مدة كل شطر من انتقال تقليب الصفحة (خروج/دخول) — تُلغى تلقائيًا مع إعداد "تقليل الحركة"
+  const MC_DAY_MS = 24 * 60 * 60 * 1000;
+  const MC_REVIEW_INTERVALS_DAYS = [1, 3, 7, 14, 30]; // بطاقات الأخطاء الذكية: سلّم التكرار المتباعد (جديد)
 
   // أي خطأ غير متوقّع (بما فيه أخطاء لم تُتوقَّع أثناء الكتابة) يظهر كرسالة قصيرة
   // بدل أن يفشل الزر بصمت دون أي إشارة لسبب المشكلة — يسهّل هذا اكتشاف أي عطل
@@ -73,6 +76,63 @@
     lightbox: document.getElementById("lightbox"),
     lightboxImg: document.getElementById("lightboxImg"),
 
+    // بطاقات الأخطاء الذكية (جديد)
+    mistakeCardIndicator: document.getElementById("mistakeCardIndicator"),
+    mistakeCardIndicatorCount: document.getElementById("mistakeCardIndicatorCount"),
+    floatingCardLayer: document.getElementById("floatingCardLayer"),
+    createMistakeCardBtn: document.getElementById("createMistakeCardBtn"),
+    mistakeCardsBtn: document.getElementById("mistakeCardsBtn"),
+    reviewMistakesBtn: document.getElementById("reviewMistakesBtn"),
+    mistakeStatsBtn: document.getElementById("mistakeStatsBtn"),
+
+    createMistakeCardModal: document.getElementById("createMistakeCardModal"),
+    mcModalTitle: document.getElementById("mcModalTitle"),
+    closeCreateMistakeCardModal: document.getElementById("closeCreateMistakeCardModal"),
+    mcModalBody: document.getElementById("mcModalBody"),
+    mcSurahPageLabel: document.getElementById("mcSurahPageLabel"),
+    mcAyahSelect: document.getElementById("mcAyahSelect"),
+    mcAyahText: document.getElementById("mcAyahText"),
+    mcAutoFillHint: document.getElementById("mcAutoFillHint"),
+    mcWordPicker: document.getElementById("mcWordPicker"),
+    mcNoteText: document.getElementById("mcNoteText"),
+    mcEditingCardId: document.getElementById("mcEditingCardId"),
+    mcCardPage: document.getElementById("mcCardPage"),
+    mcCancelBtn: document.getElementById("mcCancelBtn"),
+    mcSaveBtn: document.getElementById("mcSaveBtn"),
+
+    mistakeCardsModal: document.getElementById("mistakeCardsModal"),
+    closeMistakeCardsModal: document.getElementById("closeMistakeCardsModal"),
+    mcSearchInput: document.getElementById("mcSearchInput"),
+    mcFilterScope: document.getElementById("mcFilterScope"),
+    mcSortSelect: document.getElementById("mcSortSelect"),
+    mcShowMasteredToggle: document.getElementById("mcShowMasteredToggle"),
+    mistakeCardsListBody: document.getElementById("mistakeCardsListBody"),
+    mistakeCardsList: document.getElementById("mistakeCardsList"),
+
+    reviewMistakesModal: document.getElementById("reviewMistakesModal"),
+    closeReviewMistakesModal: document.getElementById("closeReviewMistakesModal"),
+    reviewSetup: document.getElementById("reviewSetup"),
+    reviewDueCount: document.getElementById("reviewDueCount"),
+    reviewStartBtn: document.getElementById("reviewStartBtn"),
+    reviewRun: document.getElementById("reviewRun"),
+    reviewProgressText: document.getElementById("reviewProgressText"),
+    reviewProgressFill: document.getElementById("reviewProgressFill"),
+    reviewCardMeta: document.getElementById("reviewCardMeta"),
+    reviewCardAyahText: document.getElementById("reviewCardAyahText"),
+    reviewCardNote: document.getElementById("reviewCardNote"),
+    reviewViewPageBtn: document.getElementById("reviewViewPageBtn"),
+    reviewStillWrongBtn: document.getElementById("reviewStillWrongBtn"),
+    reviewMasteredBtn: document.getElementById("reviewMasteredBtn"),
+    reviewDone: document.getElementById("reviewDone"),
+    reviewCloseAfterDoneBtn: document.getElementById("reviewCloseAfterDoneBtn"),
+
+    mistakeStatsModal: document.getElementById("mistakeStatsModal"),
+    closeMistakeStatsModal: document.getElementById("closeMistakeStatsModal"),
+    mistakeStatsBody: document.getElementById("mistakeStatsBody"),
+    mcStatsGrid: document.getElementById("mcStatsGrid"),
+    mcTopSurahsList: document.getElementById("mcTopSurahsList"),
+    mcTopWordsList: document.getElementById("mcTopWordsList"),
+
     playBtn: document.getElementById("playBtn"),
     playIcon: document.getElementById("playIcon"),
     pauseIcon: document.getElementById("pauseIcon"),
@@ -86,6 +146,10 @@
     recordRow: document.getElementById("recordRow"),
     recordBtn: document.getElementById("recordBtn"),
     recordBtnText: document.getElementById("recordBtnText"),
+    pauseRecordBtn: document.getElementById("pauseRecordBtn"),
+    pauseRecordIcon: document.getElementById("pauseRecordIcon"),
+    pauseRecordBtnText: document.getElementById("pauseRecordBtnText"),
+    recPausedBadge: document.getElementById("recPausedBadge"),
     stopRecordBtn: document.getElementById("stopRecordBtn"),
     recTimer: document.getElementById("recTimer"),
     surahRecordHint: document.getElementById("surahRecordHint"),
@@ -186,6 +250,8 @@
     mediaRecorder: null,
     chunks: [],
     recordStartTime: 0,
+    recordElapsedBeforePause: 0, // مجموع ثواني التسجيل الفعلية المتراكمة من مقاطع سابقة قبل أي إيقاف مؤقت حالي
+    recordFinalDuration: 0, // يُحسب لحظة الإيقاف النهائي (قبل أن تصبح حالة المسجّل غير نشطة) ليُستخدم عند الحفظ
     recordTimerHandle: null,
     stream: null,
 
@@ -215,6 +281,16 @@
       answers: {}, // qid -> {blob, duration, mimeType}
     },
     testMediaRecorder: null, testChunks: [], testRecordStart: 0, testRecordTimerHandle: null, testStream: null,
+
+    // بطاقات الأخطاء الذكية (جديد)
+    mc: {
+      editingId: null,          // معرّف البطاقة قيد التعديل، أو null عند إنشاء بطاقة جديدة
+      markedWords: new Set(),   // الكلمات المحدَّدة كموضع خطأ داخل نافذة الإنشاء/التعديل
+      autoFilledText: null,     // آخر نص اقتُرح تلقائيًا، لتفادي الكتابة فوق تعديل المستخدم اليدوي
+      openFloating: null,       // { page, cards, index } — البطاقات العائمة المفتوحة حاليًا فوق الصفحة
+      reviewQueue: [],          // بطاقات جلسة "راجع أخطائي" الحالية
+      reviewIndex: 0,
+    },
   };
 
   state.audio.preservesPitch = true;
@@ -241,26 +317,60 @@
     return `page-${pageNum}.jpg`;
   }
 
-  function loadPageImage(pageNum) {
+  // انتقال بصري سلس بين صورتي صفحة متتاليتين (تأثير بصري بحت — لا يمسّ الصوت أو التسجيل إطلاقًا).
+  // يعمل بتبديل صنفَي CSS فقط (بلا مضاعفة عناصر DOM)، ويُلغى تلقائيًا مع إعداد "تقليل الحركة" في النظام.
+  let pageTransitionTimer = null;
+  function runPageTransition(direction, applyFn) {
+    const img = el.pageImage;
+    if (pageTransitionTimer) { clearTimeout(pageTransitionTimer); pageTransitionTimer = null; }
+    img.classList.remove("pg-shift-left", "pg-shift-right");
+    const exitClass = direction === "next" ? "pg-shift-left" : "pg-shift-right";
+    const enterClass = direction === "next" ? "pg-shift-right" : "pg-shift-left";
+    void img.offsetWidth; // إجبار إعادة رسم فورية حتى تبدأ حركة الخروج من نقطة الصفر في كل مرة
+    img.classList.add(exitClass);
+    pageTransitionTimer = window.setTimeout(() => {
+      pageTransitionTimer = null;
+      img.classList.remove(exitClass);
+      applyFn();
+      img.classList.add(enterClass);
+      void img.offsetWidth;
+      img.classList.remove(enterClass);
+      window.setTimeout(() => mainMarkController.reposition(), PAGE_TRANSITION_MS + 20);
+    }, PAGE_TRANSITION_MS);
+  }
+
+  // pageNum: رقم الصفحة المطلوب عرضها.
+  // direction: اختياري — "next" أو "prev". يُمرَّر فقط عند التنقّل (أزرار/سحب) لتفعيل
+  // انتقال سلس؛ عند تركه فارغًا (كل الاستدعاءات الحالية عند فتح صفحة/سورة/حزب لأول مرة)
+  // يبقى السلوك تبديلاً فوريًا كما كان تمامًا دون أي تغيير.
+  function loadPageImage(pageNum, direction) {
     const src = pageImageSrc(pageNum);
     const tester = new Image();
-    tester.onload = () => {
+    const showImage = () => {
       if (state.currentPage !== pageNum) return;
       el.pageImage.src = src;
       el.pageImage.classList.remove("hidden");
       el.pageImagePlaceholder.classList.add("hidden");
       el.pageImageWrap.classList.add("has-image");
-      repositionAllMarks();
+      mainMarkController.reposition();
     };
-    tester.onerror = () => {
+    const showMissing = () => {
       if (state.currentPage !== pageNum) return;
       el.pageImage.classList.add("hidden");
       el.pageImage.removeAttribute("src");
       el.pageImagePlaceholder.classList.remove("hidden");
       el.pageImageWrap.classList.remove("has-image");
     };
+    if (direction) {
+      tester.onload = () => runPageTransition(direction, showImage);
+      tester.onerror = () => runPageTransition(direction, showMissing);
+    } else {
+      tester.onload = showImage;
+      tester.onerror = showMissing;
+    }
     tester.src = src;
     loadErrorMarksForPage(pageNum);
+    refreshMistakeIndicatorForPage(pageNum); // بطاقات الأخطاء الذكية (جديد)
   }
 
   let toastTimer = null;
@@ -591,6 +701,9 @@
   function hizbForPage(p) {
     return QURAN_AHZAB.find((h) => p >= h.startPage && p <= h.endPage) || QURAN_AHZAB[0];
   }
+  function juzForPage(p) {
+    return QURAN_JUZ.find((j) => p >= j.startPage && p <= j.endPage) || QURAN_JUZ[0];
+  }
   function populateHizbSelect(selectEl) {
     selectEl.innerHTML = "";
     const frag = document.createDocumentFragment();
@@ -655,7 +768,9 @@
   }
 
   // ===== تحميل صفحة (وضع الصفحة) =====
-  async function loadPage(pageNum) {
+  // direction: اختياري — يُمرَّر فقط عند التنقّل بالأزرار/السحب بين صفحات مستقلة لتفعيل
+  // انتقال سلس بصريًا؛ لا يغيّر أي شيء في منطق تحميل التسجيل أو حالة التشغيل.
+  async function loadPage(pageNum, direction) {
     pageNum = Math.max(1, Math.min(TOTAL_PAGES, pageNum));
     stopQueueIfActive();
     stopPlayback();
@@ -672,7 +787,7 @@
 
     try { localStorage.setItem("quran-last-page", String(pageNum)); } catch (e) { /* تجاهل */ }
 
-    loadPageImage(pageNum);
+    loadPageImage(pageNum, direction);
 
     const rec = await QuranDB.getRecording(pageNum);
     await setAudioFromRecord(rec);
@@ -763,7 +878,7 @@
     if (target < state.currentSurah.startPage || target > state.currentSurah.endPage) return;
     state.currentPage = target;
     el.pageNumberLabel.textContent = `سورة ${state.currentSurah.name} — صفحة ${target}`;
-    loadPageImage(target);
+    loadPageImage(target, delta > 0 ? "next" : "prev");
   }
 
   function flipHizbPage(delta) {
@@ -772,10 +887,129 @@
     if (target < state.currentHizb.startPage || target > state.currentHizb.endPage) return;
     state.currentPage = target;
     el.pageNumberLabel.textContent = `${state.currentHizb.name} — صفحة ${target}`;
-    loadPageImage(target);
+    loadPageImage(target, delta > 0 ? "next" : "prev");
   }
 
+  // نقطة تنقّل واحدة مشتركة بين أزرار السابق/التالي وسحبة الإصبع، حتى يبقى سلوكهما متطابقًا
+  // تمامًا دائمًا: في وضع السورة/الحزب لا تُلمَس حالة الصوت إطلاقًا (تقليب صورة فقط)،
+  // وفي وضع الصفحة تُحمَّل صفحة مستقلة بتسجيلها الخاص (نفس سلوك الأزرار الأصلي).
+  function goToAdjacentPage(delta) {
+    if (state.queue) return; // لقائمة الاستماع أزرار تنقّل خاصة بها منفصلة تمامًا عن هذه
+    if (state.mode === "surah") flipSurahPage(delta);
+    else if (state.mode === "hizb") flipHizbPage(delta);
+    else loadPage(state.currentPage + delta, delta > 0 ? "next" : "prev");
+  }
+
+  // ===== إبقاء الشاشة مضاءة أثناء التسجيل (Wake Lock) =====
+  // يعتمد على Screen Wake Lock API القياسي (مدعوم على Android/Chrome وأغلب المتصفحات
+  // الحديثة، بما فيها PWA المثبَّتة). عند عدم توفّره، يتحوّل تلقائيًا لبديل عملي:
+  // فيديو صامت غير مرئي (1×1) يعمل في حلقة مستمرة — وهي طريقة معروفة تمنع بعض
+  // المتصفحات/الأجهزة الأقدم من إطفاء الشاشة تلقائيًا أثناء تشغيل فيديو.
+  // يدعم عدّة "أصحاب" في آن واحد (تسجيل صفحة/سورة/حزب + تسجيل إجابة اختبار الحفظ)
+  // بحيث لا يُحرَّر القفل فعليًا إلا بعد توقف كل عمليات التسجيل الجارية.
+  const WakeLockCtl = (() => {
+    const isSupported = "wakeLock" in navigator;
+    let sentinel = null;
+    let fallbackVideo = null;
+    const owners = new Set();
+
+    function createFallbackVideo() {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.defaultMuted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.setAttribute("playsinline", "");
+      v.setAttribute("webkit-playsinline", "");
+      v.setAttribute("aria-hidden", "true");
+      v.tabIndex = -1;
+      Object.assign(v.style, {
+        position: "fixed", left: "-9999px", top: "0",
+        width: "1px", height: "1px", opacity: "0", pointerEvents: "none",
+      });
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 2;
+        canvas.height = 2;
+        const ctx = canvas.getContext("2d");
+        if (ctx) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 2, 2); }
+        if (canvas.captureStream) v.srcObject = canvas.captureStream(2);
+      } catch (e) { /* تجاهل — سيبقى العنصر بلا مصدر فقط إن فشل هذا */ }
+      document.body.appendChild(v);
+      return v;
+    }
+
+    async function engageFallback() {
+      if (fallbackVideo) return;
+      fallbackVideo = createFallbackVideo();
+      try { await fallbackVideo.play(); } catch (e) { /* أفضل محاولة ممكنة فقط — لا يوجد بديل أقوى */ }
+    }
+
+    function disposeFallback() {
+      if (!fallbackVideo) return;
+      try { fallbackVideo.pause(); } catch (e) { /* تجاهل */ }
+      try { fallbackVideo.remove(); } catch (e) { /* تجاهل */ }
+      fallbackVideo = null;
+    }
+
+    async function engage() {
+      if (owners.size === 0 || sentinel) return;
+      let ok = false;
+      if (isSupported) {
+        try {
+          sentinel = await navigator.wakeLock.request("screen");
+          sentinel.addEventListener("release", () => { sentinel = null; });
+          ok = true;
+        } catch (e) {
+          sentinel = null; // فشل الطلب (دعم جزئي/سياسة متصفح) — ننتقل للبديل بالأسفل
+        }
+      }
+      if (ok) disposeFallback();
+      else await engageFallback();
+    }
+
+    async function disengage() {
+      if (sentinel) {
+        try { await sentinel.release(); } catch (e) { /* تجاهل */ }
+        sentinel = null;
+      }
+      disposeFallback();
+    }
+
+    async function acquire(ownerKey) {
+      owners.add(ownerKey);
+      await engage();
+    }
+
+    async function release(ownerKey) {
+      owners.delete(ownerKey);
+      if (owners.size === 0) await disengage();
+    }
+
+    // المتصفح يُحرِّر القفل تلقائيًا كلما اختفت الصفحة (تبديل تطبيق آخر / قفل الهاتف يدويًا) —
+    // إن عاد المستخدم للتطبيق وتسجيل ما زال جاريًا فعليًا، نعيد تفعيل القفل فورًا تلقائيًا.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && owners.size > 0) engage();
+    });
+
+    return { acquire, release };
+  })();
+
   // ===== التسجيل (صفحة/سورة/حزب) =====
+
+  // جلسة التسجيل تُعتبر "نشطة" سواء كانت تُسجِّل فعليًا الآن أو متوقفة مؤقتًا (لم تُنهَ بعد)
+  function isMainRecordingActive() {
+    return !!(state.mediaRecorder && (state.mediaRecorder.state === "recording" || state.mediaRecorder.state === "paused"));
+  }
+
+  // إجمالي الثواني المسجَّلة فعليًا حتى الآن في الجلسة الحالية (يجمع كل المقاطع بين الإيقافات
+  // المؤقتة). أثناء الإيقاف المؤقت تبقى القيمة ثابتة تلقائيًا (لا يُضاف زمن الانتظار).
+  function currentRecordedSeconds() {
+    if (!state.mediaRecorder) return 0;
+    if (state.mediaRecorder.state === "paused") return state.recordElapsedBeforePause;
+    return state.recordElapsedBeforePause + (Date.now() - state.recordStartTime) / 1000;
+  }
+
   async function startRecording() {
     if (state.isPlaying) stopPlayback();
     if (state.queue) return; // لا تسجيل أثناء قائمة استماع نشطة
@@ -816,7 +1050,7 @@
 
     state.mediaRecorder.onstop = async () => {
       const blob = new Blob(state.chunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
-      const duration = (Date.now() - state.recordStartTime) / 1000;
+      const duration = state.recordFinalDuration;
 
       // نجلب سجل النسخ السابقة قبل إضافة هذه النسخة، لمقارنة مدة هذا التسجيل بمعتادها
       let priorHistory = [];
@@ -859,8 +1093,12 @@
 
     state.mediaRecorder.start();
     state.recordStartTime = Date.now();
+    state.recordElapsedBeforePause = 0; // بداية جلسة تسجيل جديدة: لا وقت متراكم من إيقافات مؤقتة بعد
+    WakeLockCtl.acquire("mainRecording"); // إبقاء الشاشة مضاءة طوال مدة التسجيل (يبقى مفعَّلاً أثناء أي إيقاف مؤقت أيضًا)
 
     el.recordBtn.classList.add("hidden");
+    el.pauseRecordBtn.classList.remove("hidden");
+    setPauseButtonUI(false);
     el.stopRecordBtn.classList.remove("hidden");
     el.recTimer.classList.remove("hidden");
     el.playBtn.disabled = true;
@@ -874,13 +1112,13 @@
     el.playlistBtn.disabled = true;
 
     state.recordTimerHandle = setInterval(() => {
-      const elapsed = (Date.now() - state.recordStartTime) / 1000;
-      el.recTimer.textContent = formatTime(elapsed);
+      el.recTimer.textContent = formatTime(currentRecordedSeconds());
     }, 200);
   }
 
   function stopRecordingIfActive(silent) {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
+      state.recordFinalDuration = currentRecordedSeconds(); // يُحسب الآن، قبل أن تصبح حالة المسجّل "inactive"
       if (silent) {
         state.mediaRecorder.onstop = () => {
           state.stream && state.stream.getTracks().forEach((t) => t.stop());
@@ -888,8 +1126,11 @@
       }
       state.mediaRecorder.stop();
     }
+    WakeLockCtl.release("mainRecording"); // يُحرَّر تلقائيًا فقط بعد توقف كل عمليات التسجيل الجارية
     clearInterval(state.recordTimerHandle);
     el.recordBtn.classList.remove("hidden");
+    el.pauseRecordBtn.classList.add("hidden");
+    setPauseButtonUI(false);
     el.stopRecordBtn.classList.add("hidden");
     el.recTimer.classList.add("hidden");
     el.modePageBtn.disabled = false;
@@ -903,6 +1144,42 @@
 
   function stopRecording() {
     stopRecordingIfActive(false);
+  }
+
+  // إيقاف مؤقت للتسجيل الجاري: يحفظ الزمن المسجَّل حتى الآن، ثم يوقف المسجّل مؤقتًا
+  // (MediaRecorder.pause) دون إنهاء الجلسة — يبقى كل شيء (الهدف، الشريحة، الميكروفون،
+  // Wake Lock) كما هو تمامًا استعدادًا للاستئناف.
+  function pauseRecording() {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== "recording") return;
+    if (typeof state.mediaRecorder.pause !== "function") {
+      showToast("متصفحك لا يدعم الإيقاف المؤقت للتسجيل");
+      return;
+    }
+    state.recordElapsedBeforePause = currentRecordedSeconds();
+    state.mediaRecorder.pause();
+    setPauseButtonUI(true);
+  }
+
+  // استئناف تسجيل متوقف مؤقتًا: يبدأ مقطعًا جديدًا يُضاف فوق ما تراكم من قبل، فينتج في
+  // النهاية ملف صوتي واحد متصل بلا أي فجوة مسموعة لمدة التوقف نفسها.
+  function resumeRecording() {
+    if (!state.mediaRecorder || state.mediaRecorder.state !== "paused") return;
+    state.recordStartTime = Date.now();
+    state.mediaRecorder.resume();
+    setPauseButtonUI(false);
+  }
+
+  function togglePauseRecording() {
+    if (!state.mediaRecorder) return;
+    if (state.mediaRecorder.state === "recording") pauseRecording();
+    else if (state.mediaRecorder.state === "paused") resumeRecording();
+  }
+
+  function setPauseButtonUI(paused) {
+    el.pauseRecordIcon.classList.toggle("is-resume", paused);
+    el.pauseRecordBtnText.textContent = paused ? "استئناف التسجيل" : "إيقاف مؤقت";
+    el.pauseRecordBtn.setAttribute("aria-label", paused ? "استئناف التسجيل" : "إيقاف التسجيل مؤقتًا");
+    el.recPausedBadge.classList.toggle("hidden", !paused);
   }
 
   // ===== التشغيل =====
@@ -1495,6 +1772,7 @@
     };
     state.testMediaRecorder.start();
     state.testRecordStart = Date.now();
+    WakeLockCtl.acquire("hizbTestRecording"); // إبقاء الشاشة مضاءة أثناء تسجيل إجابة الاختبار أيضًا
     el.hizbAnswerRecordBtn.classList.add("hidden");
     el.hizbAnswerStopBtn.classList.remove("hidden");
     el.hizbAnswerTimer.classList.remove("hidden");
@@ -1508,6 +1786,7 @@
     if (state.testMediaRecorder && state.testMediaRecorder.state === "recording") {
       state.testMediaRecorder.stop();
     }
+    WakeLockCtl.release("hizbTestRecording");
     clearInterval(state.testRecordTimerHandle);
     el.hizbTestSkipBtn.disabled = false;
   }
@@ -1646,6 +1925,7 @@
       };
       state.testMediaRecorder.stop();
     }
+    WakeLockCtl.release("hizbTestRecording");
     clearInterval(state.testRecordTimerHandle);
   }
 
@@ -2087,9 +2367,818 @@
     }
   }
 
+  // ========================================================================
+  // ===== بطاقات الأخطاء الذكية (Smart Mistake Cards) — جديد           =====
+  // ========================================================================
+  // ملاحظة مهمة وصادقة: هذا المصحف صور صفحات فقط (لا يملك التطبيق نص كل آية
+  // مخزَّنًا بالكامل في مكان واحد). لذلك تُملأ تلقائيًا كل بيانات نثق بها فعلاً
+  // (رقم الصفحة، قائمة الآيات المتاحة على الصفحة من js/pages.js)، بينما نص
+  // الآية نفسه يكتبه المستخدم بيده — مع اقتراح تلقائي لبداية الآية فقط من بنك
+  // أسئلة اختبار الحفظ (js/quiz-pool)، لأنه النص الوحيد المتوفر فعليًا داخل
+  // التطبيق والمُدقَّق سابقًا، مع تنبيه صريح أنه اقتراح جزئي يحتاج إكمالًا وتأكّدًا.
+  // مزامنة Firebase غير مفعَّلة هنا (تحتاج مشروع Firebase خاص بصاحب التطبيق)؛
+  // كل شيء يعمل محليًا بالكامل عبر IndexedDB مثل بقية میزات التطبيق.
+
+  function escapeHTML(str) {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  function splitAyahWords(text) {
+    return (text || "").split(/\s+/).filter(Boolean);
+  }
+
+  // يبني HTML لنص الآية مع تمييز الكلمات الموجودة في markedWords باللون الأحمر،
+  // محافظًا على المسافات الأصلية بين الكلمات كما كُتبت تمامًا.
+  function renderAyahHTML(text, markedWords) {
+    if (!text) return "";
+    const marked = markedWords || [];
+    const tokens = String(text).split(/(\s+)/);
+    return tokens.map((tok) => {
+      if (tok === "" || /^\s+$/.test(tok)) return escapeHTML(tok);
+      const escaped = escapeHTML(tok);
+      return marked.includes(tok) ? `<span class="mc-mistake-word">${escaped}</span>` : escaped;
+    }).join("");
+  }
+
+  function genMistakeCardId() {
+    return `mc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  // يملأ قائمة الآيات المتاحة في صفحة معيّنة (قد تحوي الصفحة أكثر من سورة عند
+  // صفحات الانتقال بين سورتين)، بالاعتماد على QURAN_PAGES المحقَّقة فعليًا.
+  function populateMcAyahSelect(pageNum) {
+    const segments = QURAN_PAGES[pageNum] || [];
+    el.mcAyahSelect.innerHTML = "";
+    segments.forEach((seg) => {
+      const surah = surahByNumber(seg.surah);
+      const surahName = surah ? surah.name : `${seg.surah}`;
+      for (let a = seg.ayahStart; a <= seg.ayahEnd; a++) {
+        const opt = document.createElement("option");
+        opt.value = `${seg.surah}:${a}`;
+        opt.textContent = `سورة ${surahName} — آية ${a}`;
+        el.mcAyahSelect.appendChild(opt);
+      }
+    });
+    if (el.mcAyahSelect.options.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "تعذّر تحديد آيات هذه الصفحة";
+      el.mcAyahSelect.appendChild(opt);
+    }
+  }
+
+  // اقتراح جزئي لبداية الآية من بنك أسئلة اختبار الحفظ (نفس النص المُدقَّق
+  // المستخدم في اختبار حفظ الأحزاب) — يُعيد null بصمت عند أي فشل أو صفحة غير مغطاة
+  // (الفاتحة وأول صفحة من البقرة مستثناتان من بنك الأسئلة، كما في باقي التطبيق).
+  async function fetchAyahPrefixHint(pageNum, surahNum, ayahNum) {
+    try {
+      const hizb = hizbForPage(pageNum);
+      if (!hizb) return null;
+      const pool = await fetchHizbPool(hizb.number);
+      const entry = (pool || []).find((q) => q.surah === surahNum && q.ayah === ayahNum);
+      return entry ? entry.prefix : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function renderWordPicker() {
+    const text = el.mcAyahText.value;
+    const words = splitAyahWords(text);
+    el.mcWordPicker.innerHTML = "";
+    if (words.length === 0) {
+      const p = document.createElement("p");
+      p.className = "mc-word-picker-empty";
+      p.id = "mcWordPickerEmpty";
+      p.textContent = "اكتب نص الآية أعلاه أولًا";
+      el.mcWordPicker.appendChild(p);
+      return;
+    }
+    words.forEach((w) => {
+      const span = document.createElement("span");
+      span.className = "mc-word" + (state.mc.markedWords.has(w) ? " marked" : "");
+      span.textContent = w;
+      span.setAttribute("role", "button");
+      span.addEventListener("click", () => {
+        if (state.mc.markedWords.has(w)) state.mc.markedWords.delete(w);
+        else state.mc.markedWords.add(w);
+        renderWordPicker();
+      });
+      el.mcWordPicker.appendChild(span);
+    });
+  }
+
+  // يُستدعى عند اختيار آية جديدة في نافذة الإنشاء/التعديل. لا يكتب فوق نص كتبه
+  // المستخدم يدويًا أبدًا — فقط عندما يكون الحقل فارغًا أو لا يزال يطابق آخر
+  // اقتراح تلقائي وضعناه نحن بالضبط.
+  async function onMcAyahSelectChange() {
+    const val = el.mcAyahSelect.value;
+    el.mcAutoFillHint.classList.add("hidden");
+    if (!val) return;
+    const parts = val.split(":");
+    const surahNum = parseInt(parts[0], 10);
+    const ayahNum = parseInt(parts[1], 10);
+    const pageNum = parseInt(el.mcCardPage.value, 10);
+    const canOverwrite = el.mcAyahText.value === "" || el.mcAyahText.value === state.mc.autoFilledText;
+    if (!canOverwrite) return;
+    const prefix = await fetchAyahPrefixHint(pageNum, surahNum, ayahNum);
+    if (el.mcAyahSelect.value !== val) return; // بدّل المستخدم الآية أثناء الانتظار
+    if (prefix) {
+      el.mcAyahText.value = prefix;
+      state.mc.autoFilledText = prefix;
+      el.mcAutoFillHint.classList.remove("hidden");
+    } else {
+      el.mcAyahText.value = "";
+      state.mc.autoFilledText = "";
+    }
+    state.mc.markedWords.clear();
+    renderWordPicker();
+  }
+
+  // نقطة الدخول الوحيدة لفتح نافذة الإنشاء/التعديل، سواء من زر الصفحة الحالية
+  // أو من صف بطاقة في شاشة الإدارة (وقتها page/card تخصّان تلك البطاقة تحديدًا،
+  // وقد تختلفان عن الصفحة المفتوحة حاليًا في المصحف).
+  async function openMistakeCardModal({ mode, page, card }) {
+    state.mc.editingId = mode === "edit" ? card.id : null;
+    state.mc.markedWords = new Set(mode === "edit" ? (card.mistakeWords || []) : []);
+    state.mc.autoFilledText = null;
+    el.mcModalTitle.textContent = mode === "edit" ? "تعديل بطاقة الخطأ" : "بطاقة خطأ جديدة";
+    el.mcSaveBtn.textContent = mode === "edit" ? "حفظ التعديلات" : "حفظ البطاقة";
+    el.mcEditingCardId.value = mode === "edit" ? card.id : "";
+    el.mcCardPage.value = String(page);
+    el.mcSurahPageLabel.textContent = `الصفحة ${page}`;
+    el.mcAutoFillHint.classList.add("hidden");
+    populateMcAyahSelect(page);
+
+    if (mode === "edit") {
+      el.mcAyahSelect.value = `${card.surahNumber}:${card.ayah}`;
+      el.mcAyahText.value = card.ayahText || "";
+      el.mcNoteText.value = card.note || "";
+    } else {
+      el.mcAyahText.value = "";
+      el.mcNoteText.value = "";
+      if (el.mcAyahSelect.options.length && el.mcAyahSelect.options[0].value) {
+        el.mcAyahSelect.selectedIndex = 0;
+        await onMcAyahSelectChange();
+      }
+    }
+    renderWordPicker();
+    el.createMistakeCardModal.classList.remove("hidden");
+  }
+
+  async function saveMistakeCardFromModal() {
+    const ayahVal = el.mcAyahSelect.value;
+    if (!ayahVal) { showToast("اختر الآية أولًا"); return; }
+    const parts = ayahVal.split(":");
+    const surahNum = parseInt(parts[0], 10);
+    const ayahNum = parseInt(parts[1], 10);
+    const text = el.mcAyahText.value.trim();
+    if (!text) { showToast("اكتب نص الآية أولًا"); return; }
+    const page = parseInt(el.mcCardPage.value, 10);
+    const surah = surahByNumber(surahNum);
+    const note = el.mcNoteText.value.trim();
+    const validWords = new Set(splitAyahWords(text));
+    const markedWords = Array.from(state.mc.markedWords).filter((w) => validWords.has(w));
+    if (markedWords.length === 0) {
+      showToast("لم تُحدَّد كلمة الخطأ — يمكنك المتابعة، لكن يُفضَّل الضغط عليها لتمييزها");
+    }
+
+    const now = Date.now();
+    const hizb = hizbForPage(page);
+    const juz = juzForPage(page);
+    el.mcSaveBtn.disabled = true;
+    try {
+      if (state.mc.editingId) {
+        const existing = await QuranDB.getMistakeCard(state.mc.editingId);
+        const card = Object.assign({}, existing, {
+          page, surahNumber: surahNum, surahName: surah ? surah.name : "",
+          ayah: ayahNum, ayahText: text, mistakeWords: markedWords, note,
+          hizbNumber: hizb ? hizb.number : null, juzNumber: juz ? juz.number : null,
+          updatedAt: now,
+        });
+        await QuranDB.saveMistakeCard(card);
+        showToast("تم تحديث البطاقة");
+      } else {
+        const card = {
+          id: genMistakeCardId(), page, surahNumber: surahNum, surahName: surah ? surah.name : "",
+          ayah: ayahNum, ayahText: text, mistakeWords: markedWords, note,
+          hizbNumber: hizb ? hizb.number : null, juzNumber: juz ? juz.number : null,
+          status: "active", createdAt: now, updatedAt: now,
+          reviewCount: 0, timesWrong: 0, reviewStageIndex: 0,
+          nextReviewAt: now + MC_REVIEW_INTERVALS_DAYS[0] * MC_DAY_MS,
+          lastReviewedAt: null, masteredAt: null,
+        };
+        await QuranDB.saveMistakeCard(card);
+        showToast("تم حفظ بطاقة الخطأ");
+      }
+      el.createMistakeCardModal.classList.add("hidden");
+      if (state.currentPage === page) refreshMistakeIndicatorForCurrentPage();
+    } catch (e) {
+      if (isStructuralDbError(e)) showToast("مشكلة في قاعدة البيانات المحلية — حدّث الصفحة وأعد المحاولة");
+      else showToast("تعذّر حفظ البطاقة، حاول مجددًا");
+    } finally {
+      el.mcSaveBtn.disabled = false;
+    }
+  }
+
+  // ===== رمز التنبيه في زاوية الصفحة =====
+  async function refreshMistakeIndicatorForPage(pageNum) {
+    closeFloatingCards();
+    try {
+      const cards = await QuranDB.getMistakeCardsForPage(pageNum);
+      if (state.currentPage !== pageNum) return;
+      const active = cards.filter((c) => c.status !== "mastered");
+      if (active.length > 0) {
+        el.mistakeCardIndicator.classList.remove("hidden");
+        el.mistakeCardIndicatorCount.textContent = String(active.length);
+      } else {
+        el.mistakeCardIndicator.classList.add("hidden");
+      }
+    } catch (e) {
+      el.mistakeCardIndicator.classList.add("hidden");
+    }
+  }
+  function refreshMistakeIndicatorForCurrentPage() { refreshMistakeIndicatorForPage(state.currentPage); }
+
+  // ===== البطاقة العائمة فوق صورة الصفحة (سحب/تصغير-تكبير/تنقّل بين عدة بطاقات) =====
+  function closeFloatingCards() {
+    el.floatingCardLayer.innerHTML = "";
+    el.pageImageWrap.classList.remove("has-floating-card");
+    state.mc.openFloating = null;
+  }
+
+  async function openFloatingCardsForPage(pageNum) {
+    try {
+      const cards = (await QuranDB.getMistakeCardsForPage(pageNum))
+        .filter((c) => c.status !== "mastered")
+        .sort((a, b) => a.createdAt - b.createdAt);
+      if (cards.length === 0) { showToast("لا توجد بطاقات نشطة لهذه الصفحة"); return; }
+      state.mc.openFloating = { page: pageNum, cards, index: 0 };
+      renderFloatingCard();
+    } catch (e) {
+      showToast("تعذّر تحميل بطاقات هذه الصفحة");
+    }
+  }
+
+  function setupFloatingCardDrag(box, handle) {
+    let pointerId = null, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    function onMove(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const wrapRect = el.pageImageWrap.getBoundingClientRect();
+      const boxRect = box.getBoundingClientRect();
+      let newLeft = startLeft + (e.clientX - startX);
+      let newTop = startTop + (e.clientY - startY);
+      newLeft = Math.max(0, Math.min(Math.max(0, wrapRect.width - boxRect.width), newLeft));
+      newTop = Math.max(0, Math.min(Math.max(wrapRect.height, boxRect.height) - boxRect.height, newTop));
+      box.style.left = newLeft + "px";
+      box.style.top = newTop + "px";
+      if (e.cancelable) e.preventDefault();
+    }
+    function onUp(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      cleanup();
+    }
+    function cleanup() {
+      pointerId = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    }
+    handle.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".fmc-icon-btn") || e.target.closest(".fmc-nav-btn")) return;
+      pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY;
+      startLeft = box.offsetLeft; startTop = box.offsetTop;
+      document.addEventListener("pointermove", onMove, { passive: false });
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onUp);
+      e.stopPropagation();
+    });
+  }
+
+  function setupFloatingCardResize(box, handle) {
+    let pointerId = null, startX = 0, startY = 0, startW = 0, startH = 0;
+    function onMove(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const wrapRect = el.pageImageWrap.getBoundingClientRect();
+      let newW = startW - (e.clientX - startX);
+      let newH = startH + (e.clientY - startY);
+      newW = Math.max(190, Math.min(wrapRect.width - box.offsetLeft, newW));
+      newH = Math.max(70, Math.min(420, newH));
+      box.style.width = newW + "px";
+      box.style.height = newH + "px";
+      if (e.cancelable) e.preventDefault();
+    }
+    function onUp(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      cleanup();
+    }
+    function cleanup() {
+      pointerId = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    }
+    handle.addEventListener("pointerdown", (e) => {
+      pointerId = e.pointerId;
+      startX = e.clientX; startY = e.clientY;
+      startW = box.offsetWidth; startH = box.offsetHeight;
+      box.style.height = startH + "px";
+      document.addEventListener("pointermove", onMove, { passive: false });
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onUp);
+      e.stopPropagation();
+    });
+  }
+
+  function renderFloatingCard() {
+    const f = state.mc.openFloating;
+    if (!f) return;
+    const card = f.cards[f.index];
+    el.floatingCardLayer.innerHTML = "";
+    el.pageImageWrap.classList.add("has-floating-card");
+
+    const box = document.createElement("div");
+    box.className = "floating-mistake-card";
+    box.style.left = "10px";
+    box.style.top = "40px";
+    box.style.width = "240px";
+
+    const header = document.createElement("div");
+    header.className = "fmc-header";
+
+    const grip = document.createElement("span");
+    grip.className = "fmc-grip";
+    grip.setAttribute("aria-hidden", "true");
+    grip.textContent = "⠿";
+    header.appendChild(grip);
+
+    const title = document.createElement("span");
+    title.className = "fmc-title";
+    title.textContent = "بطاقة خطأ";
+    header.appendChild(title);
+
+    if (f.cards.length > 1) {
+      const nav = document.createElement("span");
+      nav.className = "fmc-nav";
+      const prevBtn = document.createElement("button");
+      prevBtn.type = "button"; prevBtn.className = "fmc-nav-btn"; prevBtn.textContent = "›";
+      prevBtn.setAttribute("aria-label", "البطاقة السابقة");
+      const countSpan = document.createElement("span");
+      countSpan.textContent = `${f.index + 1}/${f.cards.length}`;
+      const nextBtn = document.createElement("button");
+      nextBtn.type = "button"; nextBtn.className = "fmc-nav-btn"; nextBtn.textContent = "‹";
+      nextBtn.setAttribute("aria-label", "البطاقة التالية");
+      prevBtn.addEventListener("click", (e) => { e.stopPropagation(); f.index = (f.index - 1 + f.cards.length) % f.cards.length; renderFloatingCard(); });
+      nextBtn.addEventListener("click", (e) => { e.stopPropagation(); f.index = (f.index + 1) % f.cards.length; renderFloatingCard(); });
+      nav.appendChild(prevBtn); nav.appendChild(countSpan); nav.appendChild(nextBtn);
+      header.appendChild(nav);
+    }
+
+    const collapseBtn = document.createElement("button");
+    collapseBtn.type = "button"; collapseBtn.className = "fmc-icon-btn";
+    collapseBtn.setAttribute("aria-label", "تصغير/تكبير البطاقة");
+    collapseBtn.textContent = "–";
+    collapseBtn.addEventListener("click", (e) => { e.stopPropagation(); box.classList.toggle("collapsed"); });
+    header.appendChild(collapseBtn);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button"; closeBtn.className = "fmc-icon-btn";
+    closeBtn.setAttribute("aria-label", "إغلاق البطاقة");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closeFloatingCards(); });
+    header.appendChild(closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "fmc-body";
+
+    const meta = document.createElement("p");
+    meta.className = "fmc-meta";
+    meta.textContent = `${card.surahName ? "سورة " + card.surahName : ""} — صفحة ${card.page} — آية ${card.ayah}`;
+    body.appendChild(meta);
+
+    const ayahP = document.createElement("p");
+    ayahP.className = "mc-ayah-text";
+    ayahP.innerHTML = renderAyahHTML(card.ayahText, card.mistakeWords);
+    body.appendChild(ayahP);
+
+    if (card.note) {
+      const noteP = document.createElement("p");
+      noteP.className = "fmc-note";
+      noteP.textContent = card.note;
+      body.appendChild(noteP);
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "fmc-footer";
+    const stats = document.createElement("span");
+    stats.className = "fmc-footer-stats";
+    stats.textContent = `${formatArabicDate(card.createdAt)} · روجعت ${card.reviewCount || 0} ${(card.reviewCount || 0) === 1 ? "مرة" : "مرات"}`;
+    footer.appendChild(stats);
+    const masterBtn = document.createElement("button");
+    masterBtn.type = "button";
+    masterBtn.className = "ctrl-btn fmc-master-btn";
+    masterBtn.textContent = "✅ تم الإتقان";
+    masterBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await toggleCardMastered(card, true);
+      f.cards.splice(f.index, 1);
+      if (f.cards.length === 0) { closeFloatingCards(); refreshMistakeIndicatorForCurrentPage(); return; }
+      f.index = f.index % f.cards.length;
+      renderFloatingCard();
+      refreshMistakeIndicatorForCurrentPage();
+    });
+    footer.appendChild(masterBtn);
+    body.appendChild(footer);
+
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "fmc-resize-handle";
+    resizeHandle.setAttribute("aria-hidden", "true");
+
+    box.appendChild(header);
+    box.appendChild(body);
+    box.appendChild(resizeHandle);
+    el.floatingCardLayer.appendChild(box);
+
+    box.addEventListener("click", (e) => e.stopPropagation());
+    box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    setupFloatingCardDrag(box, header);
+    setupFloatingCardResize(box, resizeHandle);
+  }
+
+  // ===== تبديل حالة "تم الإتقان" وحذف البطاقات =====
+  async function toggleCardMastered(card, toMastered) {
+    try {
+      const existing = await QuranDB.getMistakeCard(card.id);
+      if (!existing) return;
+      existing.status = toMastered ? "mastered" : "active";
+      existing.masteredAt = toMastered ? Date.now() : null;
+      existing.updatedAt = Date.now();
+      await QuranDB.saveMistakeCard(existing);
+      showToast(toMastered ? "أُضيفت للبطاقات المتقنة 🎉" : "أُعيدت البطاقة إلى القائمة النشطة");
+    } catch (e) {
+      showToast("تعذّر تحديث حالة البطاقة");
+    }
+  }
+
+  async function deleteMistakeCardWithConfirm(card, onDone) {
+    const ok = await showConfirm("سيتم حذف هذه البطاقة نهائيًا. هل تريد المتابعة؟");
+    if (!ok) return;
+    try {
+      await QuranDB.deleteMistakeCard(card.id);
+      showToast("تم حذف البطاقة");
+      if (onDone) onDone();
+      if (state.currentPage === card.page) refreshMistakeIndicatorForCurrentPage();
+    } catch (e) {
+      showToast("تعذّر حذف البطاقة");
+    }
+  }
+
+  // ===== نافذة إدارة بطاقات الأخطاء (بحث/تصفية/ترتيب) =====
+  async function openMistakeCardsModal() {
+    el.mistakeCardsModal.classList.remove("hidden");
+    populateMcFilterScope();
+    await renderMistakeCardsList();
+  }
+
+  function populateMcFilterScope() {
+    if (el.mcFilterScope.dataset.populated === "1") return;
+    el.mcFilterScope.dataset.populated = "1";
+    el.mcFilterScope.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "كل البطاقات";
+    el.mcFilterScope.appendChild(allOpt);
+
+    const juzGroup = document.createElement("optgroup");
+    juzGroup.label = "تصفية حسب الجزء";
+    QURAN_JUZ.forEach((j) => {
+      const opt = document.createElement("option");
+      opt.value = `juz:${j.number}`;
+      opt.textContent = `الجزء ${j.number}`;
+      juzGroup.appendChild(opt);
+    });
+    el.mcFilterScope.appendChild(juzGroup);
+
+    const hizbGroup = document.createElement("optgroup");
+    hizbGroup.label = "تصفية حسب الحزب";
+    QURAN_AHZAB.forEach((h) => {
+      const opt = document.createElement("option");
+      opt.value = `hizb:${h.number}`;
+      opt.textContent = `${h.number}. ${h.name}`;
+      hizbGroup.appendChild(opt);
+    });
+    el.mcFilterScope.appendChild(hizbGroup);
+  }
+
+  async function renderMistakeCardsList() {
+    el.mistakeCardsList.innerHTML = '<p class="playlist-empty">جارٍ التحميل…</p>';
+    let all;
+    try {
+      all = await QuranDB.getAllMistakeCards();
+    } catch (e) {
+      if (isStructuralDbError(e)) { renderDbRecoveryAction(el.mistakeCardsListBody, e); return; }
+      el.mistakeCardsList.innerHTML = '<p class="mc-list-empty">تعذّر تحميل البطاقات</p>';
+      return;
+    }
+
+    const showMastered = el.mcShowMasteredToggle.checked;
+    const query = el.mcSearchInput.value.trim();
+    const scope = el.mcFilterScope.value;
+    const sortMode = el.mcSortSelect.value;
+
+    let list = all.filter((c) => showMastered || c.status !== "mastered");
+    if (query) {
+      list = list.filter((c) =>
+        (c.surahName && c.surahName.includes(query)) ||
+        (c.ayahText && c.ayahText.includes(query)) ||
+        (c.note && c.note.includes(query)) ||
+        (c.mistakeWords || []).some((w) => w.includes(query))
+      );
+    }
+    if (scope) {
+      const scopeParts = scope.split(":");
+      const kind = scopeParts[0];
+      const num = parseInt(scopeParts[1], 10);
+      list = list.filter((c) => (kind === "juz" ? c.juzNumber === num : c.hizbNumber === num));
+    }
+    if (sortMode === "mostWrong") {
+      list = list.slice().sort((a, b) => ((b.timesWrong || 0) - (a.timesWrong || 0)) || ((b.reviewCount || 0) - (a.reviewCount || 0)) || (b.createdAt - a.createdAt));
+    } else {
+      list = list.slice().sort((a, b) => b.createdAt - a.createdAt);
+    }
+
+    if (list.length === 0) {
+      el.mistakeCardsList.innerHTML = all.length === 0
+        ? '<p class="mc-list-empty">لا توجد بطاقات أخطاء بعد. افتح أي صفحة واضغط "إنشاء بطاقة خطأ ذكية" للبدء.</p>'
+        : '<p class="mc-list-empty">لا توجد بطاقات مطابقة لبحثك أو تصفيتك الحالية.</p>';
+      return;
+    }
+
+    el.mistakeCardsList.innerHTML = "";
+    list.forEach((card) => el.mistakeCardsList.appendChild(buildMcCardRow(card)));
+  }
+
+  function buildMcCardRow(card) {
+    const row = document.createElement("div");
+    row.className = "mc-card-row" + (card.status === "mastered" ? " mastered" : "");
+
+    const head = document.createElement("div");
+    head.className = "mc-card-row-head";
+    const meta = document.createElement("span");
+    meta.className = "mc-card-meta";
+    meta.textContent = `${card.surahName ? "سورة " + card.surahName : ""} — صفحة ${card.page} — آية ${card.ayah}`;
+    head.appendChild(meta);
+    if (card.status === "mastered") {
+      const pill = document.createElement("span");
+      pill.className = "mc-status-pill";
+      pill.textContent = "✅ متقنة";
+      head.appendChild(pill);
+    }
+    row.appendChild(head);
+
+    const textEl = document.createElement("p");
+    textEl.className = "mc-ayah-text mc-ayah-text-sm";
+    textEl.innerHTML = renderAyahHTML(card.ayahText, card.mistakeWords);
+    row.appendChild(textEl);
+
+    if (card.note) {
+      const note = document.createElement("p");
+      note.className = "mc-card-note";
+      note.textContent = card.note;
+      row.appendChild(note);
+    }
+
+    const footRow = document.createElement("div");
+    footRow.className = "mc-card-footer-row";
+    const stats = document.createElement("span");
+    stats.className = "mc-card-stats";
+    const s1 = document.createElement("span"); s1.textContent = `📅 ${formatArabicDate(card.createdAt)}`;
+    const s2 = document.createElement("span"); s2.textContent = `🔁 روجعت ${card.reviewCount || 0}`;
+    const s3 = document.createElement("span"); s3.textContent = `❌ تكرر ${card.timesWrong || 0}`;
+    stats.appendChild(s1); stats.appendChild(s2); stats.appendChild(s3);
+    footRow.appendChild(stats);
+
+    const actions = document.createElement("div");
+    actions.className = "mc-card-actions";
+
+    const gotoBtn = document.createElement("button");
+    gotoBtn.type = "button"; gotoBtn.className = "mc-action-btn"; gotoBtn.setAttribute("aria-label", "فتح الصفحة");
+    gotoBtn.textContent = "📖";
+    gotoBtn.addEventListener("click", () => {
+      el.mistakeCardsModal.classList.add("hidden");
+      setModeUI("page");
+      loadPage(card.page);
+    });
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button"; editBtn.className = "mc-action-btn"; editBtn.setAttribute("aria-label", "تعديل");
+    editBtn.textContent = "✏️";
+    editBtn.addEventListener("click", () => {
+      openMistakeCardModal({ mode: "edit", page: card.page, card });
+    });
+
+    const masterBtn = document.createElement("button");
+    masterBtn.type = "button"; masterBtn.className = "mc-action-btn";
+    masterBtn.setAttribute("aria-label", card.status === "mastered" ? "إرجاع كنشطة" : "تم الإتقان");
+    masterBtn.textContent = card.status === "mastered" ? "↩️" : "✅";
+    masterBtn.addEventListener("click", async () => {
+      await toggleCardMastered(card, card.status !== "mastered");
+      renderMistakeCardsList();
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button"; delBtn.className = "mc-action-btn mc-delete"; delBtn.setAttribute("aria-label", "حذف");
+    delBtn.textContent = "🗑";
+    delBtn.addEventListener("click", () => {
+      deleteMistakeCardWithConfirm(card, renderMistakeCardsList);
+    });
+
+    actions.appendChild(gotoBtn);
+    actions.appendChild(editBtn);
+    actions.appendChild(masterBtn);
+    actions.appendChild(delBtn);
+    footRow.appendChild(actions);
+    row.appendChild(footRow);
+
+    return row;
+  }
+
+  // ===== المراجعة الذكية المتباعدة ("راجع أخطائي") =====
+  function computeDueMistakeCards(all, now) {
+    return all.filter((c) => c.status !== "mastered" && c.nextReviewAt <= now);
+  }
+
+  async function openReviewMistakesModal() {
+    el.reviewMistakesModal.classList.remove("hidden");
+    el.reviewSetup.classList.remove("hidden");
+    el.reviewRun.classList.add("hidden");
+    el.reviewDone.classList.add("hidden");
+    el.reviewDueCount.textContent = "جارٍ التحميل…";
+    el.reviewStartBtn.disabled = true;
+    try {
+      const all = await QuranDB.getAllMistakeCards();
+      const due = computeDueMistakeCards(all, Date.now());
+      state.mc.reviewQueue = due;
+      if (due.length === 0) {
+        el.reviewDueCount.textContent = "لا توجد بطاقات مستحقة الآن — أحسنت! عُد لاحقًا.";
+        el.reviewStartBtn.disabled = true;
+      } else {
+        el.reviewDueCount.textContent = `عدد البطاقات المستحقة للمراجعة الآن: ${due.length}`;
+        el.reviewStartBtn.disabled = false;
+      }
+    } catch (e) {
+      if (isStructuralDbError(e)) { renderDbRecoveryAction(el.reviewSetup, e); return; }
+      el.reviewDueCount.textContent = "تعذّر تحميل البطاقات المستحقة";
+    }
+  }
+
+  function startReviewSession() {
+    const queue = state.mc.reviewQueue || [];
+    if (queue.length === 0) return;
+    state.mc.reviewIndex = 0;
+    el.reviewSetup.classList.add("hidden");
+    el.reviewDone.classList.add("hidden");
+    el.reviewRun.classList.remove("hidden");
+    renderReviewCard();
+  }
+
+  function renderReviewCard() {
+    const queue = state.mc.reviewQueue;
+    const idx = state.mc.reviewIndex;
+    if (idx >= queue.length) { finishReviewSession(); return; }
+    const card = queue[idx];
+    el.reviewProgressText.textContent = `البطاقة ${idx + 1} من ${queue.length}`;
+    el.reviewProgressFill.style.width = `${(idx / queue.length) * 100}%`;
+    el.reviewCardMeta.textContent = `${card.surahName ? "سورة " + card.surahName : ""} — صفحة ${card.page} — آية ${card.ayah}`;
+    el.reviewCardAyahText.innerHTML = renderAyahHTML(card.ayahText, card.mistakeWords);
+    if (card.note) {
+      el.reviewCardNote.textContent = card.note;
+      el.reviewCardNote.classList.remove("hidden");
+    } else {
+      el.reviewCardNote.classList.add("hidden");
+    }
+  }
+
+  async function answerReviewCard(gotItRight) {
+    const queue = state.mc.reviewQueue;
+    const idx = state.mc.reviewIndex;
+    const card = queue[idx];
+    if (!card) return;
+    el.reviewStillWrongBtn.disabled = true;
+    el.reviewMasteredBtn.disabled = true;
+    try {
+      const fresh = await QuranDB.getMistakeCard(card.id);
+      const target = fresh || card;
+      const now = Date.now();
+      target.reviewCount = (target.reviewCount || 0) + 1;
+      target.lastReviewedAt = now;
+      if (gotItRight) {
+        target.reviewStageIndex = Math.min((target.reviewStageIndex || 0) + 1, MC_REVIEW_INTERVALS_DAYS.length - 1);
+      } else {
+        target.timesWrong = (target.timesWrong || 0) + 1;
+        target.reviewStageIndex = 0;
+      }
+      target.nextReviewAt = now + MC_REVIEW_INTERVALS_DAYS[target.reviewStageIndex] * MC_DAY_MS;
+      target.updatedAt = now;
+      await QuranDB.saveMistakeCard(target);
+    } catch (e) {
+      showToast("تعذّر حفظ نتيجة المراجعة لهذه البطاقة");
+    }
+    el.reviewStillWrongBtn.disabled = false;
+    el.reviewMasteredBtn.disabled = false;
+    state.mc.reviewIndex += 1;
+    renderReviewCard();
+  }
+
+  function finishReviewSession() {
+    el.reviewRun.classList.add("hidden");
+    el.reviewDone.classList.remove("hidden");
+  }
+
+  // ===== إحصائيات بطاقات الأخطاء =====
+  async function openMistakeStatsModal() {
+    el.mistakeStatsModal.classList.remove("hidden");
+    el.mcStatsGrid.innerHTML = '<p class="playlist-empty">جارٍ التحميل…</p>';
+    el.mcTopSurahsList.innerHTML = "";
+    el.mcTopWordsList.innerHTML = "";
+    try {
+      const all = await QuranDB.getAllMistakeCards();
+      renderMistakeStats(all);
+    } catch (e) {
+      if (isStructuralDbError(e)) { renderDbRecoveryAction(el.mistakeStatsBody, e); return; }
+      el.mcStatsGrid.innerHTML = '<p class="mc-list-empty">تعذّر تحميل الإحصائيات</p>';
+    }
+  }
+
+  function renderMistakeStats(all) {
+    const total = all.length;
+    const mastered = all.filter((c) => c.status === "mastered").length;
+    const pct = total > 0 ? Math.round((mastered / total) * 100) : 0;
+
+    el.mcStatsGrid.innerHTML =
+      `<div class="mc-stat-tile"><span class="mc-stat-num">${total}</span><span class="mc-stat-label">إجمالي البطاقات</span></div>` +
+      `<div class="mc-stat-tile"><span class="mc-stat-num">${mastered}</span><span class="mc-stat-label">بطاقات مُتقنة</span></div>` +
+      `<div class="mc-stat-tile"><span class="mc-stat-num">${pct}%</span><span class="mc-stat-label">نسبة الإتقان</span></div>`;
+
+    if (total === 0) {
+      el.mcTopSurahsList.innerHTML = '<p class="mc-list-empty">لا توجد بيانات بعد</p>';
+      el.mcTopWordsList.innerHTML = '<p class="mc-list-empty">لا توجد بيانات بعد</p>';
+      return;
+    }
+
+    const surahCounts = {};
+    all.forEach((c) => {
+      const key = c.surahName || "—";
+      surahCounts[key] = (surahCounts[key] || 0) + 1;
+    });
+    const topSurahs = Object.entries(surahCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    el.mcTopSurahsList.innerHTML = "";
+    topSurahs.forEach((entry) => {
+      const name = entry[0], count = entry[1];
+      const row = document.createElement("div");
+      row.className = "mc-rank-row";
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "mc-rank-name";
+      nameSpan.textContent = `سورة ${name}`;
+      const countSpan = document.createElement("span");
+      countSpan.className = "mc-rank-count";
+      countSpan.textContent = String(count);
+      row.appendChild(nameSpan); row.appendChild(countSpan);
+      el.mcTopSurahsList.appendChild(row);
+    });
+
+    const wordCounts = {};
+    all.forEach((c) => {
+      (c.mistakeWords || []).forEach((w) => { wordCounts[w] = (wordCounts[w] || 0) + 1; });
+    });
+    const topWords = Object.entries(wordCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (topWords.length === 0) {
+      el.mcTopWordsList.innerHTML = '<p class="mc-list-empty">لم تُحدَّد كلمات أخطاء بعد</p>';
+    } else {
+      el.mcTopWordsList.innerHTML = "";
+      topWords.forEach((entry) => {
+        const word = entry[0], count = entry[1];
+        const row = document.createElement("div");
+        row.className = "mc-rank-row";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "mc-rank-name mc-rank-word";
+        nameSpan.textContent = word;
+        const countSpan = document.createElement("span");
+        countSpan.className = "mc-rank-count";
+        countSpan.textContent = String(count);
+        row.appendChild(nameSpan); row.appendChild(countSpan);
+        el.mcTopWordsList.appendChild(row);
+      });
+    }
+  }
+
+
   // ===== ربط الأحداث: التبديل بين الأوضاع =====
   el.modePageBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2099,7 +3188,7 @@
   });
 
   el.modeSurahBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2110,7 +3199,7 @@
   });
 
   el.modeHizbBtn.addEventListener("click", () => {
-    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    if (isMainRecordingActive()) {
       showToast("أوقف التسجيل الحالي أولًا");
       return;
     }
@@ -2148,6 +3237,7 @@
   });
 
   el.recordBtn.addEventListener("click", startRecording);
+  el.pauseRecordBtn.addEventListener("click", togglePauseRecording);
   el.stopRecordBtn.addEventListener("click", stopRecording);
 
   el.deleteBtn.addEventListener("click", async () => {
@@ -2181,16 +3271,89 @@
   });
 
   // ===== ربط الأحداث: التنقل بين الصفحات =====
-  el.prevPage.addEventListener("click", () => {
-    if (state.mode === "surah") flipSurahPage(-1);
-    else if (state.mode === "hizb") flipHizbPage(-1);
-    else loadPage(state.currentPage - 1);
-  });
-  el.nextPage.addEventListener("click", () => {
-    if (state.mode === "surah") flipSurahPage(1);
-    else if (state.mode === "hizb") flipHizbPage(1);
-    else loadPage(state.currentPage + 1);
-  });
+  el.prevPage.addEventListener("click", () => goToAdjacentPage(-1));
+  el.nextPage.addEventListener("click", () => goToAdjacentPage(1));
+
+  // ===== السحب يمينًا/يسارًا للتنقل بين الصفحات (بلا قطع صوت تسجيل أو تشغيل جارٍ) =====
+  // يعتمد على Pointer Events (يعمل باللمس وبالفأرة معًا بنفس الكود). يميّز بدقة بين:
+  //  - نقرة عادية (تكبير الصورة أو وضع علامة خطأ — تبقى تعمل تمامًا كما كانت)
+  //  - تمرير رأسي عادي لصفحة الويب (يُترك للمتصفح يتولاه بنفسه دون أي تدخّل لضمان سلاسته)
+  //  - سحبة أفقية فعلية (تُنقِّل الصفحة ثم تمنع "نقرة الشبح" التي قد تعقبها)
+  // ملاحظة تقنية: التتبّع أثناء السحبة يتم عبر مستمعين مؤقّتين على document (يُضافان عند
+  // pointerdown ويُزالان فور انتهاء السحبة) بدل setPointerCapture، حتى يستمر التتبّع بشكل
+  // صحيح حتى لو خرج الإصبع/المؤشر من حدود الصورة أثناء السحب، دون أي كلفة أداء دائمة.
+  (function setupPageSwipeNavigation() {
+    const wrap = el.pageImageWrap;
+    const MIN_SWIPE_DISTANCE = 42; // أقل مسافة أفقية (px) لاعتبار الحركة سحبة تنقّل فعلية
+    const MAX_OFF_AXIS = 65;       // أقصى انحراف رأسي مسموح به لتبقى الحركة أفقية بوضوح
+    const AXIS_LOCK_DISTANCE = 10; // مسافة صغيرة تكفي لتحديد اتجاه الحركة أفقي/رأسي
+
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let axis = null; // "x" أفقي مؤكَّد، "y" رأسي مؤكَّد، null لم يُحسم بعد
+    let suppressNextClick = false;
+
+    function onMove(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (axis === null && (Math.abs(dx) > AXIS_LOCK_DISTANCE || Math.abs(dy) > AXIS_LOCK_DISTANCE)) {
+        axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+      // نمنع التمرير الافتراضي فقط بعد التأكّد أن الحركة أفقية بوضوح، حتى لا نُعطِّل
+      // التمرير الرأسي الطبيعي للصفحة في أي لحظة أخرى (راجع أيضًا touch-action في CSS)
+      if (axis === "x" && e.cancelable) e.preventDefault();
+    }
+
+    function onUp(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const isSwipe = axis === "x" && Math.abs(dx) >= MIN_SWIPE_DISTANCE && Math.abs(dy) <= MAX_OFF_AXIS;
+      cleanup();
+      if (isSwipe) {
+        suppressNextClick = true;
+        goToAdjacentPage(dx < 0 ? 1 : -1); // سحب لليسار → الصفحة التالية، لليمين → السابقة
+      }
+    }
+
+    function onCancel() { cleanup(); }
+
+    function cleanup() {
+      pointerId = null;
+      axis = null;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onCancel);
+    }
+
+    wrap.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (state.queue) return; // القائمة لا تدعم هذا التنقّل، ولها أزرارها الخاصة أصلاً
+      if (e.target.closest(".error-mark")) return; // اترك التعامل مع علامات الأخطاء لمتحكّمها الخاص
+      if (e.target.closest(".floating-mistake-card") || e.target.closest(".mistake-card-indicator")) return; // بطاقات الأخطاء الذكية (جديد) — لها سحب/نقر خاص بها
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      axis = null;
+      document.addEventListener("pointermove", onMove, { passive: false });
+      document.addEventListener("pointerup", onUp);
+      document.addEventListener("pointercancel", onCancel);
+    });
+
+    // طبقة حماية إضافية: يمنع سحب الصورة الأصلي بالمتصفح (يظهر عادة عند السحب بالفأرة على
+    // <img>)، لأنه كان يُلغي تسلسل أحداث المؤشر بالكامل (pointercancel) ويوقف السحبة فورًا.
+    wrap.addEventListener("dragstart", (e) => e.preventDefault());
+
+    // يمنع "نقرة شبح" (فتح تكبير الصورة أو وضع علامة خطأ) قد تُطلَق عادة عقب سحبة فعلية تمّت للتو
+    wrap.addEventListener("click", (e) => {
+      if (!suppressNextClick) return;
+      suppressNextClick = false;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+  })();
 
   el.pageInput.addEventListener("change", () => {
     if (state.mode !== "page") return;
@@ -2238,6 +3401,69 @@
   el.closeErrorStatsModal.addEventListener("click", () => el.errorStatsModal.classList.add("hidden"));
   el.errorStatsModal.addEventListener("click", (e) => {
     if (e.target === el.errorStatsModal) el.errorStatsModal.classList.add("hidden");
+  });
+
+  // ===== ربط الأحداث: بطاقات الأخطاء الذكية (جديد) =====
+  el.createMistakeCardBtn.addEventListener("click", () => {
+    openMistakeCardModal({ mode: "create", page: state.currentPage });
+  });
+  el.mistakeCardIndicator.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (state.mc.openFloating && state.mc.openFloating.page === state.currentPage) closeFloatingCards();
+    else openFloatingCardsForPage(state.currentPage);
+  });
+  el.mistakeCardIndicator.addEventListener("pointerdown", (e) => e.stopPropagation());
+
+  // نافذة الإنشاء/التعديل
+  el.closeCreateMistakeCardModal.addEventListener("click", () => el.createMistakeCardModal.classList.add("hidden"));
+  el.mcCancelBtn.addEventListener("click", () => el.createMistakeCardModal.classList.add("hidden"));
+  el.createMistakeCardModal.addEventListener("click", (e) => {
+    if (e.target === el.createMistakeCardModal) el.createMistakeCardModal.classList.add("hidden");
+  });
+  el.mcAyahSelect.addEventListener("change", onMcAyahSelectChange);
+  el.mcAyahText.addEventListener("input", () => {
+    if (el.mcAyahText.value !== state.mc.autoFilledText) state.mc.autoFilledText = null;
+    renderWordPicker();
+  });
+  el.mcSaveBtn.addEventListener("click", saveMistakeCardFromModal);
+
+  // نافذة إدارة بطاقات الأخطاء
+  el.mistakeCardsBtn.addEventListener("click", openMistakeCardsModal);
+  el.closeMistakeCardsModal.addEventListener("click", () => el.mistakeCardsModal.classList.add("hidden"));
+  el.mistakeCardsModal.addEventListener("click", (e) => {
+    if (e.target === el.mistakeCardsModal) el.mistakeCardsModal.classList.add("hidden");
+  });
+  let mcSearchDebounceTimer = null;
+  el.mcSearchInput.addEventListener("input", () => {
+    clearTimeout(mcSearchDebounceTimer);
+    mcSearchDebounceTimer = setTimeout(renderMistakeCardsList, 150);
+  });
+  el.mcFilterScope.addEventListener("change", renderMistakeCardsList);
+  el.mcSortSelect.addEventListener("change", renderMistakeCardsList);
+  el.mcShowMasteredToggle.addEventListener("change", renderMistakeCardsList);
+
+  // نافذة "راجع أخطائي"
+  el.reviewMistakesBtn.addEventListener("click", openReviewMistakesModal);
+  el.closeReviewMistakesModal.addEventListener("click", () => el.reviewMistakesModal.classList.add("hidden"));
+  el.reviewMistakesModal.addEventListener("click", (e) => {
+    if (e.target === el.reviewMistakesModal) el.reviewMistakesModal.classList.add("hidden");
+  });
+  el.reviewStartBtn.addEventListener("click", startReviewSession);
+  el.reviewMasteredBtn.addEventListener("click", () => answerReviewCard(true));
+  el.reviewStillWrongBtn.addEventListener("click", () => answerReviewCard(false));
+  el.reviewCloseAfterDoneBtn.addEventListener("click", () => el.reviewMistakesModal.classList.add("hidden"));
+  el.reviewViewPageBtn.addEventListener("click", () => {
+    const card = state.mc.reviewQueue[state.mc.reviewIndex];
+    if (!card) return;
+    el.lightboxImg.src = pageImageSrc(card.page);
+    el.lightbox.classList.remove("hidden");
+  });
+
+  // نافذة إحصائيات بطاقات الأخطاء
+  el.mistakeStatsBtn.addEventListener("click", openMistakeStatsModal);
+  el.closeMistakeStatsModal.addEventListener("click", () => el.mistakeStatsModal.classList.add("hidden"));
+  el.mistakeStatsModal.addEventListener("click", (e) => {
+    if (e.target === el.mistakeStatsModal) el.mistakeStatsModal.classList.add("hidden");
   });
 
   // ===== ربط الأحداث: قائمة الاستماع =====
@@ -2335,7 +3561,7 @@
 
   // منع فقدان تسجيل جارٍ عند إغلاق الصفحة
   window.addEventListener("beforeunload", (e) => {
-    const recording = (state.mediaRecorder && state.mediaRecorder.state === "recording") ||
+    const recording = isMainRecordingActive() ||
       (state.testMediaRecorder && state.testMediaRecorder.state === "recording");
     if (recording) {
       e.preventDefault();
