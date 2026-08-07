@@ -91,21 +91,16 @@
       <div class="page-status">
         <span id="pageNumberLabel">الصفحة 1</span>
         <span id="recordedBadge" class="badge hidden">مسجَّلة</span>
-        <span id="recPausedBadge" class="badge rec-paused-badge hidden">⏸ التسجيل متوقف مؤقتًا</span>
         <span id="errorCountBadge" class="badge error-count-badge hidden">عدد الأخطاء الحالية: 0</span>
       </div>
 
       <!-- صورة صفحة المصحف -->
       <div class="page-image-wrap" id="pageImageWrap" role="button" tabindex="0" aria-label="تكبير صورة الصفحة">
-        <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف" draggable="false">
+        <img id="pageImage" class="page-image hidden" alt="صورة صفحة المصحف">
         <div id="pageImagePlaceholder" class="page-image-placeholder">
           لم تُضَف صورة هذه الصفحة بعد
         </div>
         <div id="errorMarksLayer" class="error-marks-layer"></div>
-        <button id="mistakeCardIndicator" class="mistake-card-indicator hidden" type="button" aria-label="بطاقات خطأ ذكية لهذه الصفحة">
-          <span aria-hidden="true">📌</span><span id="mistakeCardIndicatorCount">0</span>
-        </button>
-        <div id="floatingCardLayer" class="floating-card-layer"></div>
       </div>
 
       <div class="error-mark-controls">
@@ -114,13 +109,6 @@
           <span>وضع علامة خطأ</span>
         </button>
         <p class="mark-mode-hint hidden" id="markModeHint">الوضع مفعَّل — اضغط على أي مكان في الصورة لوضع علامة، أو اضغط على علامة موجودة لحذفها.</p>
-      </div>
-
-      <div class="mistake-card-controls">
-        <button id="createMistakeCardBtn" class="mistake-card-create-btn" type="button">
-          <span aria-hidden="true">🗒️</span>
-          <span>إنشاء بطاقة خطأ ذكية لهذه الصفحة</span>
-        </button>
       </div>
 
       <!-- حلقة التقدم / التكرار حول زر التشغيل -->
@@ -150,17 +138,13 @@
           <span class="dot"></span>
           <span class="btn-text" id="recordBtnText">تسجيل الصفحة</span>
         </button>
-        <button id="pauseRecordBtn" class="ctrl-btn pause-btn hidden" type="button" aria-label="إيقاف التسجيل مؤقتًا">
-          <span class="pause-icon" id="pauseRecordIcon" aria-hidden="true"></span>
-          <span class="btn-text" id="pauseRecordBtnText">إيقاف مؤقت</span>
-        </button>
         <button id="stopRecordBtn" class="ctrl-btn hidden" aria-label="إيقاف التسجيل">
           <span class="square"></span>
           <span class="btn-text">إيقاف التسجيل</span>
         </button>
         <span id="recTimer" class="rec-timer hidden">0:00</span>
       </div>
-      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك التنقل بين الصفحات (بالأزرار أو بالسحب يمينًا/يسارًا) أثناء التسجيل أو الاستماع، دون أي انقطاع.</p>
+      <p class="surah-record-hint hidden" id="surahRecordHint">يمكنك تقليب الصفحات أثناء التسجيل، ويستمر التسجيل متصلاً حتى تضغط إيقاف.</p>
 
       <!-- أزرار التشغيل -->
       <div class="control-row playback-row">
@@ -241,24 +225,6 @@
       <button id="errorStatsBtn" class="playlist-open-btn">
         <span class="playlist-icon" aria-hidden="true">📍</span>
         <span>إحصائيات مواضع الأخطاء</span>
-      </button>
-
-      <!-- زر فتح بطاقات الأخطاء الذكية (جديد) -->
-      <button id="mistakeCardsBtn" class="playlist-open-btn">
-        <span class="playlist-icon" aria-hidden="true">🗂️</span>
-        <span>بطاقات الأخطاء الذكية</span>
-      </button>
-
-      <!-- زر فتح المراجعة الذكية المتباعدة (جديد) -->
-      <button id="reviewMistakesBtn" class="playlist-open-btn accent">
-        <span class="playlist-icon" aria-hidden="true">🔁</span>
-        <span>راجع أخطائي</span>
-      </button>
-
-      <!-- زر فتح إحصائيات بطاقات الأخطاء (جديد) -->
-      <button id="mistakeStatsBtn" class="playlist-open-btn">
-        <span class="playlist-icon" aria-hidden="true">📈</span>
-        <span>إحصائيات بطاقات الأخطاء</span>
       </button>
 
     </div>
@@ -437,143 +403,6 @@
     <p class="modal-hint">عدد العلامات الحالية في كل صفحة وضعتَ فيها علامة ولو مرة — راقب كيف ينخفض العدد مع مراجعاتك.</p>
     <div class="modal-body" id="errorStatsBody">
       <div id="errorStatsList" class="error-stats-list"></div>
-    </div>
-  </div>
-</div>
-
-<!-- نافذة إنشاء/تعديل بطاقة خطأ ذكية -->
-<div id="createMistakeCardModal" class="modal hidden" role="dialog" aria-label="بطاقة خطأ ذكية">
-  <div class="modal-card">
-    <div class="modal-header">
-      <h2 id="mcModalTitle">بطاقة خطأ جديدة</h2>
-      <button id="closeCreateMistakeCardModal" class="modal-close" aria-label="إغلاق">×</button>
-    </div>
-    <p class="modal-hint">السورة والصفحة تُملآن تلقائيًا. اختر الآية، ثم اكتب نصّها كاملاً (أو أكمل الاقتراح إن ظهر)، ثم اضغط على الكلمة التي أخطأت فيها لتظهر باللون الأحمر.</p>
-    <div class="modal-body" id="mcModalBody">
-
-      <div class="mc-field">
-        <span class="mc-field-label">الصفحة</span>
-        <p id="mcSurahPageLabel" class="mc-readonly-value">—</p>
-      </div>
-
-      <div class="mc-field">
-        <label for="mcAyahSelect" class="mc-field-label">الآية</label>
-        <select id="mcAyahSelect" class="mc-select"></select>
-      </div>
-
-      <div class="mc-field">
-        <label for="mcAyahText" class="mc-field-label">نص الآية</label>
-        <textarea id="mcAyahText" class="mc-textarea mc-ayah-input" dir="rtl" rows="3" placeholder="اكتب نص الآية كاملاً هنا"></textarea>
-        <p class="mc-hint-small hidden" id="mcAutoFillHint">اقتراح تلقائي لبداية الآية من بيانات الحزب — أكمِله وتأكّد منه، فالتطبيق لا يملك نص المصحف كاملاً (صور فقط).</p>
-      </div>
-
-      <div class="mc-field">
-        <span class="mc-field-label">اضغط على الكلمة أو الكلمات التي أخطأت فيها</span>
-        <div id="mcWordPicker" class="mc-word-picker">
-          <p class="mc-word-picker-empty" id="mcWordPickerEmpty">اكتب نص الآية أعلاه أولًا</p>
-        </div>
-      </div>
-
-      <div class="mc-field">
-        <label for="mcNoteText" class="mc-field-label">ملاحظة (اختياري)</label>
-        <textarea id="mcNoteText" class="mc-textarea" dir="rtl" rows="2" placeholder="سبب الخطأ أو طريقة تذكّره..."></textarea>
-      </div>
-
-      <input type="hidden" id="mcEditingCardId" value="">
-      <input type="hidden" id="mcCardPage" value="">
-    </div>
-    <div class="modal-footer">
-      <button id="mcCancelBtn" class="ctrl-btn" type="button">إلغاء</button>
-      <button id="mcSaveBtn" class="ctrl-btn primary" type="button">حفظ البطاقة</button>
-    </div>
-  </div>
-</div>
-
-<!-- نافذة بطاقات الأخطاء الذكية (إدارة) -->
-<div id="mistakeCardsModal" class="modal hidden" role="dialog" aria-label="بطاقات الأخطاء الذكية">
-  <div class="modal-card">
-    <div class="modal-header">
-      <h2>بطاقات الأخطاء</h2>
-      <button id="closeMistakeCardsModal" class="modal-close" aria-label="إغلاق">×</button>
-    </div>
-    <div class="mc-filters">
-      <label for="mcSearchInput" class="sr-only">ابحث</label>
-      <input type="search" id="mcSearchInput" class="mc-search-input" placeholder="ابحث باسم السورة أو بكلمة من الآية...">
-      <div class="mc-filters-row">
-        <label for="mcFilterScope" class="sr-only">تصفية حسب الجزء أو الحزب</label>
-        <select id="mcFilterScope" class="mc-select"></select>
-        <label for="mcSortSelect" class="sr-only">ترتيب</label>
-        <select id="mcSortSelect" class="mc-select">
-          <option value="newest">الأحدث أولًا</option>
-          <option value="mostWrong">الأكثر تكرارًا للخطأ</option>
-        </select>
-      </div>
-      <label class="mc-toggle-mastered">
-        <input type="checkbox" id="mcShowMasteredToggle">
-        <span>إظهار البطاقات المتقنة أيضًا</span>
-      </label>
-    </div>
-    <div class="modal-body" id="mistakeCardsListBody">
-      <div id="mistakeCardsList" class="mc-card-list"></div>
-    </div>
-  </div>
-</div>
-
-<!-- نافذة المراجعة الذكية المتباعدة -->
-<div id="reviewMistakesModal" class="modal hidden" role="dialog" aria-label="راجع أخطائي">
-  <div class="modal-card">
-    <div class="modal-header">
-      <h2>راجع أخطائي</h2>
-      <button id="closeReviewMistakesModal" class="modal-close" aria-label="إغلاق">×</button>
-    </div>
-
-    <div id="reviewSetup" class="mc-review-setup">
-      <p class="modal-hint">تعرض هذه المراجعة بطاقاتك وفق نظام تكرار متباعد (بعد يوم، ٣ أيام، ٧ أيام، ١٤ يومًا، ثم شهر) — كلما أتقنتَ البطاقة، تباعدت مراجعتها التالية؛ وإن أخطأتَ فيها ثانية، تعود للبداية.</p>
-      <p id="reviewDueCount" class="mc-review-due-count">—</p>
-      <button id="reviewStartBtn" class="ctrl-btn primary" type="button">ابدأ المراجعة</button>
-    </div>
-
-    <div id="reviewRun" class="mc-review-run hidden">
-      <div class="hizb-test-progress">
-        <span id="reviewProgressText">البطاقة 1 من 1</span>
-        <div class="hizb-test-progress-bar"><div id="reviewProgressFill" class="hizb-test-progress-fill"></div></div>
-      </div>
-
-      <div class="hizb-test-card mc-review-card">
-        <p class="hizb-test-meta" id="reviewCardMeta">صفحة — / سورة —</p>
-        <p class="mc-ayah-text" id="reviewCardAyahText" dir="rtl">—</p>
-        <p class="mc-review-note hidden" id="reviewCardNote"></p>
-        <button id="reviewViewPageBtn" class="hizb-test-view-page-btn" type="button">👁 عرض هذه الصفحة من المصحف الأصلي</button>
-      </div>
-
-      <div class="mc-review-actions">
-        <button id="reviewStillWrongBtn" class="ctrl-btn danger" type="button">🔁 ما زلت أخطئ</button>
-        <button id="reviewMasteredBtn" class="ctrl-btn primary" type="button">✅ أتقنتها</button>
-      </div>
-    </div>
-
-    <div id="reviewDone" class="mc-review-done hidden">
-      <p class="mc-review-done-msg">أحسنت! أنهيتَ كل البطاقات المستحقة الآن. 🎉</p>
-      <button id="reviewCloseAfterDoneBtn" class="ctrl-btn primary" type="button">تم</button>
-    </div>
-  </div>
-</div>
-
-<!-- نافذة إحصائيات بطاقات الأخطاء -->
-<div id="mistakeStatsModal" class="modal hidden" role="dialog" aria-label="إحصائيات بطاقات الأخطاء">
-  <div class="modal-card">
-    <div class="modal-header">
-      <h2>إحصائيات بطاقات الأخطاء</h2>
-      <button id="closeMistakeStatsModal" class="modal-close" aria-label="إغلاق">×</button>
-    </div>
-    <div class="modal-body" id="mistakeStatsBody">
-      <div class="mc-stats-grid" id="mcStatsGrid"></div>
-
-      <p class="playlist-section-title">أكثر السور التي تحتوي أخطاء</p>
-      <div class="mc-rank-list" id="mcTopSurahsList"></div>
-
-      <p class="playlist-section-title">أكثر الكلمات تكرارًا في الأخطاء</p>
-      <div class="mc-rank-list" id="mcTopWordsList"></div>
     </div>
   </div>
 </div>
