@@ -12,7 +12,10 @@
 
 const QuranDB = (() => {
   const DB_NAME = "quranReviewDB";
-  const DB_VERSION = 6;
+  const DB_VERSION = 9; // مهم: لا تُنزَّل هذه القيمة أبدًا — IndexedDB يرفض فتح قاعدة بيانات
+  // برقم إصدار أقل مما وصلت إليه فعليًا على جهاز المستخدم سابقًا (كما حدث هنا: كانت
+  // وصلت لـ7/8 أثناء تجربة ميزة أُزيلت لاحقًا، فرجوعها لـ6 كسر فتح القاعدة بالكامل).
+  // عند أي تعديل مستقبلي على الإصدار، ارفعه فقط، ولا تُرجعه لقيمة أقدم مهما كان السبب.
   const STORE = "recordings";
   const SURAH_STORE = "surahRecordings";
   const HIZB_STORE = "hizbRecordings";
