@@ -10,15 +10,12 @@
  *  - "errorMarks"        دوائر مواضع الأخطاء على صورة كل صفحة (بإحداثيات نسبية)
  *  - "mistakeCards"       بطاقات الأخطاء الذكية: بطاقة كاملة لكل خطأ (نص الآية، الكلمة
  *                          الخاطئة، ملاحظة، مواعيد المراجعة المتباعدة) — جديد
- *  - "ayahTextCache"      ذاكرة محلية لنص كل آية كتبها المستخدم بنفسه مرة واحدة —
- *                          تُستخدم لملء نص الآية تلقائيًا في المرات التالية لنفس
- *                          الآية دون أي مصدر خارجي غير موثوق (جديد)
  * لا يعتمد على أي اتصال بالإنترنت — كل شيء محفوظ على الجهاز فقط.
  */
 
 const QuranDB = (() => {
   const DB_NAME = "quranReviewDB";
-  const DB_VERSION = 8;
+  const DB_VERSION = 7;
   const STORE = "recordings";
   const SURAH_STORE = "surahRecordings";
   const HIZB_STORE = "hizbRecordings";
@@ -27,7 +24,6 @@ const QuranDB = (() => {
   const HISTORY_STORE = "recordingHistory";
   const ERROR_MARKS_STORE = "errorMarks";
   const MISTAKE_CARDS_STORE = "mistakeCards";
-  const AYAH_TEXT_CACHE_STORE = "ayahTextCache";
 
   let dbPromise = null;
 
@@ -63,9 +59,6 @@ const QuranDB = (() => {
         if (!db.objectStoreNames.contains(MISTAKE_CARDS_STORE)) {
           const mc = db.createObjectStore(MISTAKE_CARDS_STORE, { keyPath: "id" });
           mc.createIndex("byPage", "page", { unique: false });
-        }
-        if (!db.objectStoreNames.contains(AYAH_TEXT_CACHE_STORE)) {
-          db.createObjectStore(AYAH_TEXT_CACHE_STORE, { keyPath: "key" });
         }
       };
       req.onsuccess = (e) => resolve(e.target.result);
@@ -376,28 +369,6 @@ const QuranDB = (() => {
     });
   }
 
-  // ===== ذاكرة نصوص الآيات (جديد) =====
-  // مصدرها الوحيد نص كتبه المستخدم بنفسه سابقًا لنفس الآية (عبر بطاقة خطأ) — لا
-  // يُملأ أبدًا من أي مصدر خارجي غير موثوق، حفاظًا على دقة نص القرآن المعروض.
-  async function getCachedAyahText(surahNum, ayahNum) {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(AYAH_TEXT_CACHE_STORE, "readonly");
-      const req = tx.objectStore(AYAH_TEXT_CACHE_STORE).get(`${surahNum}:${ayahNum}`);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  async function saveCachedAyahText(surahNum, ayahNum, text) {
-    const db = await open();
-    const tx = db.transaction(AYAH_TEXT_CACHE_STORE, "readwrite");
-    tx.objectStore(AYAH_TEXT_CACHE_STORE).put({
-      key: `${surahNum}:${ayahNum}`, surahNumber: surahNum, ayah: ayahNum, text, updatedAt: Date.now(),
-    });
-    return txDone(tx);
-  }
-
   // ملاذ أخير للتعافي: يحذف قاعدة البيانات المحلية بالكامل (كل التسجيلات) ليُعاد
   // إنشاؤها من جديد بأحدث بنية. تُستخدم فقط إن تعذّر الإصلاح التلقائي عبر ترقية
   // الإصدار العادية (مثلاً إن كانت قاعدة البيانات في حالة غير متّسقة لسبب ما).
@@ -460,7 +431,6 @@ const QuranDB = (() => {
     saveHistoryEntry, getHistoryForTarget, deleteHistoryEntry, clearHistoryForTarget,
     getErrorMarks, saveErrorMarks, getAllErrorMarkPages,
     saveMistakeCard, getMistakeCard, deleteMistakeCard, getAllMistakeCards, getMistakeCardsForPage,
-    getCachedAyahText, saveCachedAyahText,
     resetAll,
   };
 })();
