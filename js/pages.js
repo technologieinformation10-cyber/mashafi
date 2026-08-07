@@ -1,20 +1,32 @@
 // بيانات كل صفحة: أي سور/آيات موجودة فيها — محقَّقة فعليًا عبر مطابقة نص
 // مصوَّر لمعظم السور متعددة الصفحات (وليس تقديرًا تناسبيًا كما كان سابقًا)
+//
+// === حالة التحقّق (تُحدَّث مع كل مراجعة إضافية) ===
+// مؤكَّدة عبر قراءة مباشرة لأرقام علامات نهاية الآيات المطبوعة على صور الصفحات
+// نفسها (page-N.jpg)، وليس أي مصدر خارجي:
+//   - الصفحات 1-14: مؤكَّدة بالكامل (صفحات 6-14 صُحِّحت بتاريخ 2026-08-07، كانت خاطئة)
+//   - صفحة 77 (بداية سورة النساء) وصفحات جزء عمّ (582-604): جرى تدقيقها عيّنيًا
+//     وتبيّن أنها صحيحة كما هي — تطابق الادّعاء بأنها حُقِّقت يدويًا سابقًا
+//   - صفحات حول 298-303 (سورة الكهف): عيّنة سريعة تبدو متوافقة مع البيانات الحالية
+//   - الصفحات 15 حتى 49 (بقية سورة البقرة): عيّنات سريعة تؤكّد وجود نفس نوع الخطأ
+//     (فحص صفحة 17: العلامة الفعلية ١٠٥ مقابل ادّعاء البيانات ١١١) لكنها لم تُصحَّح
+//     رقمًا رقمًا بعد — التصحيح الدقيق يحتاج مراجعة مماثلة لكل صفحة
+//   - باقي صفحات المصحف بعد سورة البقرة: لم تُراجَع بعد في هذه الجولة
 const QURAN_PAGES = {
   1: [{surah:1,ayahStart:1,ayahEnd:7}],
   2: [{surah:2,ayahStart:1,ayahEnd:13}],
   3: [{surah:2,ayahStart:14,ayahEnd:22}],
   4: [{surah:2,ayahStart:23,ayahEnd:27}],
   5: [{surah:2,ayahStart:28,ayahEnd:34}],
-  6: [{surah:2,ayahStart:35,ayahEnd:43}],
-  7: [{surah:2,ayahStart:44,ayahEnd:54}],
-  8: [{surah:2,ayahStart:55,ayahEnd:60}],
-  9: [{surah:2,ayahStart:61,ayahEnd:66}],
-  10: [{surah:2,ayahStart:67,ayahEnd:74}],
-  11: [{surah:2,ayahStart:75,ayahEnd:80}],
-  12: [{surah:2,ayahStart:81,ayahEnd:85}],
-  13: [{surah:2,ayahStart:86,ayahEnd:91}],
-  14: [{surah:2,ayahStart:92,ayahEnd:98}],
+  6: [{surah:2,ayahStart:35,ayahEnd:36}],
+  7: [{surah:2,ayahStart:37,ayahEnd:47}],
+  8: [{surah:2,ayahStart:48,ayahEnd:56}],
+  9: [{surah:2,ayahStart:57,ayahEnd:60}],
+  10: [{surah:2,ayahStart:61,ayahEnd:68}],
+  11: [{surah:2,ayahStart:69,ayahEnd:75}],
+  12: [{surah:2,ayahStart:76,ayahEnd:82}],
+  13: [{surah:2,ayahStart:83,ayahEnd:88}],
+  14: [{surah:2,ayahStart:89,ayahEnd:92}],
   15: [{surah:2,ayahStart:99,ayahEnd:103}],
   16: [{surah:2,ayahStart:104,ayahEnd:110}],
   17: [{surah:2,ayahStart:111,ayahEnd:117}],

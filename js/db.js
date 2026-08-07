@@ -7,15 +7,12 @@
  *  - "testRecordings"   تسجيلات إجابات اختبار الحفظ (لكل سؤال داخل كل حزب)
  *  - "usedQuestions"    تتبع الأسئلة المستخدمة سابقًا في كل حزب (لعدم التكرار)
  *  - "recordingHistory" أرشيف كل نسخ التسجيل السابقة لكل صفحة/سورة/حزب (سجل التقدّم)
- *  - "errorMarks"        دوائر مواضع الأخطاء على صورة كل صفحة (بإحداثيات نسبية)
- *  - "mistakeCards"       بطاقات الأخطاء الذكية: بطاقة كاملة لكل خطأ (نص الآية، الكلمة
- *                          الخاطئة، ملاحظة، مواعيد المراجعة المتباعدة) — جديد
  * لا يعتمد على أي اتصال بالإنترنت — كل شيء محفوظ على الجهاز فقط.
  */
 
 const QuranDB = (() => {
   const DB_NAME = "quranReviewDB";
-  const DB_VERSION = 7;
+  const DB_VERSION = 6;
   const STORE = "recordings";
   const SURAH_STORE = "surahRecordings";
   const HIZB_STORE = "hizbRecordings";
@@ -23,7 +20,6 @@ const QuranDB = (() => {
   const USED_Q_STORE = "usedQuestions";
   const HISTORY_STORE = "recordingHistory";
   const ERROR_MARKS_STORE = "errorMarks";
-  const MISTAKE_CARDS_STORE = "mistakeCards";
 
   let dbPromise = null;
 
@@ -55,10 +51,6 @@ const QuranDB = (() => {
         }
         if (!db.objectStoreNames.contains(ERROR_MARKS_STORE)) {
           db.createObjectStore(ERROR_MARKS_STORE, { keyPath: "page" });
-        }
-        if (!db.objectStoreNames.contains(MISTAKE_CARDS_STORE)) {
-          const mc = db.createObjectStore(MISTAKE_CARDS_STORE, { keyPath: "id" });
-          mc.createIndex("byPage", "page", { unique: false });
         }
       };
       req.onsuccess = (e) => resolve(e.target.result);
@@ -321,54 +313,6 @@ const QuranDB = (() => {
     });
   }
 
-  // ===== بطاقات الأخطاء الذكية (جديد) =====
-  // كل بطاقة سجل مستقل بمعرّف فريد؛ فهرس "byPage" يتيح معرفة بطاقات صفحة معيّنة
-  // بسرعة (يُستخدم عند كل فتح لصفحة لعرض رمز التنبيه في زاويتها دون قراءة كل البطاقات).
-  async function saveMistakeCard(card) {
-    const db = await open();
-    const tx = db.transaction(MISTAKE_CARDS_STORE, "readwrite");
-    tx.objectStore(MISTAKE_CARDS_STORE).put(card);
-    return txDone(tx);
-  }
-
-  async function getMistakeCard(id) {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(MISTAKE_CARDS_STORE, "readonly");
-      const req = tx.objectStore(MISTAKE_CARDS_STORE).get(id);
-      req.onsuccess = () => resolve(req.result || null);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  async function deleteMistakeCard(id) {
-    const db = await open();
-    const tx = db.transaction(MISTAKE_CARDS_STORE, "readwrite");
-    tx.objectStore(MISTAKE_CARDS_STORE).delete(id);
-    return txDone(tx);
-  }
-
-  async function getAllMistakeCards() {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(MISTAKE_CARDS_STORE, "readonly");
-      const req = tx.objectStore(MISTAKE_CARDS_STORE).getAll();
-      req.onsuccess = () => resolve((req.result || []).sort((a, b) => b.createdAt - a.createdAt));
-      req.onerror = (e) => reject(e.target.error);
-    });
-  }
-
-  async function getMistakeCardsForPage(page) {
-    const db = await open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(MISTAKE_CARDS_STORE, "readonly");
-      const idx = tx.objectStore(MISTAKE_CARDS_STORE).index("byPage");
-      const req = idx.getAll(IDBKeyRange.only(page));
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  }
-
   // ملاذ أخير للتعافي: يحذف قاعدة البيانات المحلية بالكامل (كل التسجيلات) ليُعاد
   // إنشاؤها من جديد بأحدث بنية. تُستخدم فقط إن تعذّر الإصلاح التلقائي عبر ترقية
   // الإصدار العادية (مثلاً إن كانت قاعدة البيانات في حالة غير متّسقة لسبب ما).
@@ -430,7 +374,6 @@ const QuranDB = (() => {
     getUsedQuestionIds, addUsedQuestionIds, resetUsedQuestionIds,
     saveHistoryEntry, getHistoryForTarget, deleteHistoryEntry, clearHistoryForTarget,
     getErrorMarks, saveErrorMarks, getAllErrorMarkPages,
-    saveMistakeCard, getMistakeCard, deleteMistakeCard, getAllMistakeCards, getMistakeCardsForPage,
     resetAll,
   };
 })();
